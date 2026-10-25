@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0 — GM-A fix round 1
+
+- Keep failed branch setup gated through read-only observations; retry installed dependencies before native admission.
+- Match Database inactive-turn selector errors and keep earlier active receipt recovery available.
+- Bind native panel facts/errors to the selected story and ignore obsolete asynchronous reads.
+
 ## 0.1.0 — GM-A checkpoint
 
 - Shared native GM preset, reviewed story startup and metadata-only recovery journal.

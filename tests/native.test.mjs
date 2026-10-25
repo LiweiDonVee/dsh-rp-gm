@@ -68,3 +68,19 @@ test('unload cancels an inherited scope still awaiting dependency setup',async t
   const child=f.makeAgent('deferred-child',f.id);child.events.push(...structuredClone(f.sessions.get(f.id).events));const attaching=f.emit('agent/created',{agent:child});await ready;await f.service.close();release();await attaching;
   assert.equal(child.tools.has('rp_commit_turn'),false);assert.equal(f.profileInherits.includes(child.id),false);
 });
+test('inactive historical turn selectors do not block the preceding active receipt or resurrect later facts',async t=>{
+  const f=await opened(t),stateA=await f.runTool(f.id,'rp_gm_state');
+  const receiptA=await f.runTool(f.id,'rp_commit_turn',{expectedRevision:stateA.revision,summary:'把信放在柜台',facts:{schemaVersion:1,items:[{id:'letter-holder',text:'密封信件放在柜台上。'}]},packet:{playerAction:'把信放在柜台'}});f.finish(f.id);
+  const stateB=await f.runTool(f.id,'rp_gm_state'),receiptB=await f.runTool(f.id,'rp_commit_turn',{expectedRevision:stateB.revision,summary:'掌柜收信',facts:{schemaVersion:1,items:[{id:'letter-holder',text:'密封信件由林遥持有。'}]},packet:{playerAction:'请掌柜保管信件'}});f.finish(f.id);
+  const agent=f.sessions.get(f.id),source=agent.events.find(event=>event.type==='assistant/message'&&event.data.message.id===receiptB.source.assistantMessageId);f.states.get(f.id).inactive.add(receiptB.id);
+  f.append(agent,'user/message',{id:'owner-rewind',role:'user',content:[]},{op:'replace',startSeq:source.seq,endSeq:agent.events.filter(event=>event.surfaceOp==='append').at(-1).seq});
+  const access=await f.db.factAccess({sessionId:f.id,agent});await assert.rejects(access.currentReceipt(receiptB.turnKey),{code:'INACTIVE_SOURCE'});assert.equal((await access.getReceipt(receiptA.id)).id,receiptA.id);
+  const current=await f.service.storyState({sessionId:f.id});assert.equal(current.lastFactReceipt.id,receiptA.id);assert.equal(current.facts.items[0].text,'密封信件放在柜台上。');
+  assert.equal((await f.service.presentation({sessionId:f.id,agent,factReceiptId:receiptA.id})).factReceipt.id,receiptA.id);const nativeState=await f.runTool(f.id,'rp_gm_state');assert.equal(nativeState.lastFactReceipt.id,receiptA.id);assert.equal(nativeState.currentReceipt,null);
+  await f.service.rollbackStory({sessionId:f.id});assert.equal(f.forks.at(-1).atSeq,receiptA.source.turnStartSeq-1);assert.equal((await f.service.storyState({sessionId:f.id})).facts.items[0].text,'密封信件放在柜台上。');assert.equal(f.counts.factWrites,3);
+});
+test('historical receipt discovery still propagates dependency errors other than inactive source',async t=>{
+  const f=await opened(t),state=await f.runTool(f.id,'rp_gm_state'),receipt=await f.runTool(f.id,'rp_commit_turn',{expectedRevision:state.revision,summary:'等待',packet:{playerAction:'等待'}}),original=f.db.factAccess;
+  f.db.factAccess=async input=>{const access=await original(input);return {...access,currentReceipt:async key=>{if(key===receipt.turnKey)throw Object.assign(Error('Database selector unavailable'),{code:'DATABASE_UNAVAILABLE'});return access.currentReceipt(key);}};};
+  await assert.rejects(f.service.storyState({sessionId:f.id}),{code:'DATABASE_UNAVAILABLE'});await assert.rejects(f.service.presentation({sessionId:f.id,agent:f.sessions.get(f.id),factReceiptId:receipt.id}),{code:'DATABASE_UNAVAILABLE'});assert.equal(f.counts.factWrites,2);
+});

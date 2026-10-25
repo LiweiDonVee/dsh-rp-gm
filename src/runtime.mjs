@@ -12,16 +12,15 @@ export function createGmRuntime({ctx,store,database,bound,viewFor,notify}) {
     const receipts=[];
     for(const id of ids)try{receipts.push(await access.getReceipt(id));}catch(error){if(!['INACTIVE_SOURCE','RECEIPT_NOT_FOUND'].includes(error.code))throw error;}
     const starts=view.events.filter(event=>event.type==='turn/start');
-    for(const start of starts){const receipt=await access.currentReceipt(JSON.stringify([view.sessionId,start.seq]));if(receipt&&!receipts.some(value=>value.id===receipt.id))receipts.push(receipt);}
+    for(const start of starts){
+      let receipt;try{receipt=await access.currentReceipt(JSON.stringify([view.sessionId,start.seq]));}catch(error){if(error.code==='INACTIVE_SOURCE')continue;throw error;}
+      if(receipt&&!receipts.some(value=>value.id===receipt.id))receipts.push(receipt);
+    }
     return receipts.sort((a,b)=>b.source.turnStartSeq-a.source.turnStartSeq||(b.source.callSeq??0)-(a.source.callSeq??0))[0];
   }
   async function refresh(sessionId,agent,signal) {
     const record=await bound(sessionId,agent,signal);if(!record)return null;
-    if(await store.gate(sessionId))return record;
-    if(record.binding.status==='restoring'){
-      const last=ctx.get('rpLastStep');if(typeof last?.state!=='function')return record;
-      const value=(await last.state(sessionId,signal)).binding;if(value?.profileId!==record.binding.profile.profileId||value.version!==record.binding.profile.version)return record;
-    }
+    if(await store.gate(sessionId)||record.binding.status==='restoring')return record;
     const live=agent??ctx.agents.get(sessionId),view=projectSession(await viewFor(sessionId,live,signal)),presentations=await accepted(view,live,signal);let opened=false;
     if(live&&presentations.length&&ctx.get('rpDatabase')?.apiVersion===2){const access=await database().factAccess({sessionId,agent:live,signal});for(const item of presentations){try{const receipt=await access.getReceipt(item.factReceiptId);if(receipt.kind==='opening'&&receipt.sessionId===sessionId){opened=true;if(record.opening?.receiptId!==receipt.id){record.opening=await store.opening(sessionId,{turnKey:receipt.turnKey,source:receipt.source,receiptId:receipt.id},true);}break;}}catch(error){if(!['INACTIVE_SOURCE','RECEIPT_NOT_FOUND'].includes(error.code))throw error;}}}
     else opened=record.binding.status==='active'&&presentations.some(item=>item.factReceiptId===record.opening?.receiptId);

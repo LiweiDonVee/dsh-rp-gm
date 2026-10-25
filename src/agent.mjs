@@ -10,8 +10,8 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
     {name:'rp_begin_story',description:'Commit the owner-selected opening once. The seed and exact text come from the story binding, never tool arguments.',parameters:schema({}),method:'begin'},
     {name:'rp_commit_turn',description:'Atomically commit this turn once, respecting human policies. Reuse its receipt if presentation fails.',parameters:schema({expectedRevision:{type:'integer',minimum:0},scene:{type:'object'},facts:{type:'object'},operations:{type:'array',items:{type:'object'}},summary:{type:'string'},packet:{type:'object'}},['expectedRevision','summary','packet']),method:'commit'},
   ];
-  async function attach(agent){
-    if(stopped||scopes.has(agent))return;
+  async function attach(agent,retrySetup=false){
+    if(stopped)return;const existing=scopes.get(agent);if(existing){if(retrySetup)await runtime.ensure(agent,existing.life.signal);return;}
     const record={tools:[],restriction:undefined,life:new AbortController()};scopes.set(agent,record);
     let bound;try{bound=await runtime.ensure(agent,record.life.signal);}catch(error){if(record.life.signal.aborted)return;scopes.delete(agent);throw error;}if(stopped||scopes.get(agent)!==record)return;
     if(bound&&ctx.tools.get('run_code',agent)===undefined){
@@ -24,7 +24,10 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
   function release(agent){const record=scopes.get(agent);if(!record)return;record.life.abort();for(const dispose of record.tools.reverse())dispose();record.restriction?.();scopes.delete(agent);}
   disposers.push(ctx.on('agent/created',({agent})=>attach(agent)));
   disposers.push(ctx.on('agent/disposed',({agent})=>release(agent)));
-  disposers.push(ctx.on('agent/pre-step',async({agent},next)=>await runtime.reserved(agent.session.id)?{kind:'reject'}:next()));
+  disposers.push(ctx.on('agent/pre-step',async({agent},next)=>{
+    if(await runtime.reserved(agent.session.id)){try{await attach(agent,true);}catch{return {kind:'reject'};}if(await runtime.reserved(agent.session.id))return {kind:'reject'};}
+    return next();
+  }));
   disposers.push(ctx.systemPrompt.context({name:'rp-gm-state',order:280,required:true,interpolate:false,text:()=>cache.get(ctx.agents.currentInitiator())??''}));
   disposers.push(ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const agent=ctx.agents.currentInitiator();if(agent&&await runtime.ensure(agent)){await runtime.assertPlayable(agent.session.id);await attach(agent);cache.set(agent,await contextFor(agent));}return next();},{prepend:true}));
   for(const agent of ctx.agents.list())await attach(agent);

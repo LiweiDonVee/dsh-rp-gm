@@ -34,3 +34,21 @@ test('restore gate blocks a partial startup retry and only reserved native pre-s
   let entered=0;await f.emit('agent/pre-step',{agent:f.sessions.get(id)},()=>{entered++;});assert.equal(entered,0);
   const foreign=f.makeAgent('foreign');await f.emit('agent/pre-step',{agent:foreign},()=>{entered++;});assert.equal(entered,1);
 });
+test('Context inheritance failure stays gated through observations and failed retries until complete setup succeeds',async t=>{
+  const f=await opened(t),contextCalls=[];let available=false;
+  f.services.set('rpContext',{state:async input=>{contextCalls.push(input.sessionId);if(!available)throw Object.assign(Error('Context plan inheritance failed'),{code:'CONTEXT_UNAVAILABLE'});return {};}});
+  await assert.rejects(f.service.forkStory({sessionId:f.id}),{code:'CONTEXT_UNAVAILABLE'});const child=[...f.sessions.keys()].find(id=>id!==f.id),agent=f.sessions.get(child);
+  assert.equal((await f.service.listStories({})).stories.find(story=>story.sessionId===child).status,'restoring');
+  assert.equal((await f.service.binding({sessionId:child})).status,'restoring');const inspected=await f.service.storyState({sessionId:child});assert.equal(inspected.binding.status,'restoring');assert.deepEqual(inspected.capabilities,{rollback:false,fork:false,autoplay:false});
+  let admitted=false;await f.emit('agent/pre-step',{agent},()=>{admitted=true;});assert.equal(admitted,false);assert.equal((await f.service.binding({sessionId:child})).status,'restoring');assert.equal(f.counts.factWrites,1);
+  await assert.rejects(f.service.presentation({sessionId:child,agent,factReceiptId:'any'}),{code:'STORY_RESTORING'});assert.ok(contextCalls.length>=2);
+  available=true;await f.emit('agent/pre-step',{agent},()=>{admitted=true;});assert.equal(admitted,true);assert.equal((await f.service.binding({sessionId:child})).status,'active');
+  f.ctx.currentAgent=agent;await f.emit('system-prompt/assemble',{}, {},async()=>{});const state=await f.runTool(child,'rp_gm_state');
+  const receipt=await f.runTool(child,'rp_commit_turn',{expectedRevision:state.revision,summary:'依赖就绪后继续',packet:{playerAction:'等待'}});assert.equal(receipt.sessionId,child);assert.equal(f.counts.factWrites,2);assert.equal(f.states.get(f.id).receipts.length,1);
+});
+test('a later branch setup failure retries required Context even when the child already owns a tool scope',async t=>{
+  const f=await opened(t);let calls=0;f.services.set('rpContext',{state:async()=>{if(++calls===2)throw Object.assign(Error('Context final setup failed'),{code:'CONTEXT_UNAVAILABLE'});return {};}});
+  await assert.rejects(f.service.forkStory({sessionId:f.id}),{code:'CONTEXT_UNAVAILABLE'});const child=[...f.sessions.keys()].find(id=>id!==f.id),agent=f.sessions.get(child);assert.equal(agent.tools.has('rp_commit_turn'),true);
+  assert.equal((await f.service.binding({sessionId:child})).status,'restoring');assert.equal(calls,2);let admitted=false;await f.emit('agent/pre-step',{agent},()=>{admitted=true;});
+  assert.equal(admitted,true);assert.equal(calls,3);assert.equal((await f.service.binding({sessionId:child})).status,'active');assert.equal(f.counts.factWrites,1);
+});

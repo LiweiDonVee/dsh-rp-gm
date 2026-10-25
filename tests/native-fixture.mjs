@@ -11,7 +11,7 @@ export function nativeFixture(f){
     const project=value=>{const {fingerprint,...receipt}=value;void fingerprint;return {...clone(receipt),...receipt.sessionId===sessionId?{}:{originSessionId:receipt.sessionId,sessionId}};};
     const getReceipt=async id=>{const value=state.receipts.find(r=>r.id===id);if(!value)throw new GmError('RECEIPT_NOT_FOUND','missing',404);if(state.inactive.has(id))throw new GmError('INACTIVE_SOURCE','inactive',409);return project(value);};
     return {snapshot:async()=>({revision:f.getRevision(),binding:clone(state.binding),entries:entries().filter(e=>e.mode!=='disabled'),notes:[],changes:clone(state.changes)}),getReceipt,
-      currentReceipt:async key=>{const value=state.receipts.find(r=>r.turnKey===key&&!state.inactive.has(r.id));return value?project(value):null;},
+      currentReceipt:async key=>{const value=state.receipts.find(r=>r.turnKey===key);if(value&&state.inactive.has(value.id))throw new GmError('INACTIVE_SOURCE','inactive',409);return value?project(value):null;},
       commit:async input=>{
         if(input.turnKey!==JSON.stringify([sessionId,input.source.turnStartSeq]))throw new GmError('INVALID_SOURCE','turn mismatch',403);
         const call=agent.events.find(e=>e.seq===input.source.callSeq);if(call?.type!=='tool/call'||call.data.callId!==input.source.callId||!['rp_begin_story','rp_commit_turn'].includes(call.data.name))throw new GmError('INVALID_SOURCE','not native',403);
