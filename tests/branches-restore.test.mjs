@@ -5,7 +5,7 @@ test('generic rollback creates a child before the latest ordinary factual turn a
   const f=await opened(t);assert.deepEqual((await f.service.storyState({sessionId:f.id})).capabilities,{rollback:false,fork:true,autoplay:false});await assert.rejects(f.service.rollbackStory({sessionId:f.id}),{code:'ROLLBACK_UNAVAILABLE'});
   const state=await f.runTool(f.id,'rp_gm_state'),receipt=await f.runTool(f.id,'rp_commit_turn',{expectedRevision:state.revision,summary:'交信',facts:{schemaVersion:1,items:[{id:'letter-holder',text:'林遥持有信件。'}]},packet:{playerAction:'交信'}});
   assert.equal((await f.service.storyState({sessionId:f.id})).capabilities.rollback,true);
-  const child=await f.service.rollbackStory({sessionId:f.id});assert.notEqual(child.sessionId,f.id);assert.equal(f.forks[0].atSeq,receipt.source.turnStartSeq-1);assert.equal(f.profileInherits.includes(child.sessionId),true);
+  const boundary=f.sessions.get(f.id).events.findLast(event=>event.type==='turn/end'&&event.seq<receipt.source.turnStartSeq).seq,child=await f.service.rollbackStory({sessionId:f.id});assert.notEqual(child.sessionId,f.id);assert.equal(f.forks[0].atSeq,boundary);assert.equal(f.profileInherits.includes(child.sessionId),true);
   assert.equal((await f.service.storyState({sessionId:child.sessionId})).facts.items[0].text,'密封信件由旅人持有。');assert.equal((await f.service.storyState({sessionId:f.id})).facts.items[0].text,'林遥持有信件。');assert.equal(child.binding.status,'active');
 });
 test('fork initializes optional Context plan and refuses missing LastStep inheritance before creating child',async t=>{

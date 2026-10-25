@@ -2,6 +2,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {clone,entryKey,fail,readState,requestFingerprint} from './core.mjs';
 import {acceptedFactPresentations,projectSession} from './session.mjs';
 import {envelope,normalizeState,sessionIds} from './transfer-schema.mjs';
+import {validateInitialSources} from './sources.mjs';
 
 const required=message=>fail('RESTORE_REQUIREMENT_MISSING',message,409);
 const invalid=message=>fail('RESTORE_PAYLOAD_INVALID',message,400);
@@ -27,7 +28,8 @@ export function createGmTransfer({ctx,store,readSession,notify}){
       signal?.throwIfAborted();const {binding}=record,view=views.get(binding.sessionId);
       if((view.header.parentSession??undefined)!==(record.parentSessionId??undefined))invalid('GM binding ancestry does not match canonical Session header');validateOpeningSource(record,view,views);
       let database,profile,presentation;try{database=await ctx.get('rpDatabase').effectiveV2({sessionId:binding.sessionId,signal});profile=await ctx.get('rpLastStep').profile(binding.profile,signal);presentation=await ctx.get('rpLastStep').state(binding.sessionId,signal);}catch(error){if(['NOT_BOUND','NOT_FOUND','SESSION_NOT_FOUND','PROFILE_NOT_FOUND','BINDING_NOT_FOUND'].includes(error.code))required('Required Database or presentation state has not been restored');throw error;}
-      if(database.binding?.schemaVersion!==2||requestFingerprint(database.binding.sources)!==requestFingerprint(binding.sources)||!sameRefs(database.binding.factEntryRefs??[],binding.factEntryRefs))invalid('Database source/fact binding does not match GM metadata');
+      if(database.binding?.schemaVersion!==2||!sameRefs(database.binding.factEntryRefs??[],binding.factEntryRefs))invalid('Database fact binding does not match GM registered references');
+      await validateInitialSources(ctx.get('rpDatabase'),binding.sources,signal);
       const keys=new Set(database.entries.map(entry=>entryKey(entry.ref)));if(binding.factEntryRefs.some(ref=>!keys.has(entryKey(ref))))required('A registered GM state entry is missing');readState(database);
       if(profile.profile?.id!==binding.profile.profileId||profile.profile.version!==binding.profile.version)required('Initial launch style provenance is unavailable');
       const current=presentation.binding;if(typeof current?.profileId!=='string'||!Number.isSafeInteger(current.version)||current.version<1)required('Current LastStep binding is unavailable');

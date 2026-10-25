@@ -77,7 +77,7 @@ test('inactive historical turn selectors do not block the preceding active recei
   const access=await f.db.factAccess({sessionId:f.id,agent});await assert.rejects(access.currentReceipt(receiptB.turnKey),{code:'INACTIVE_SOURCE'});assert.equal((await access.getReceipt(receiptA.id)).id,receiptA.id);
   const current=await f.service.storyState({sessionId:f.id});assert.equal(current.lastFactReceipt.id,receiptA.id);assert.equal(current.facts.items[0].text,'密封信件放在柜台上。');
   assert.equal((await f.service.presentation({sessionId:f.id,agent,factReceiptId:receiptA.id})).factReceipt.id,receiptA.id);const nativeState=await f.runTool(f.id,'rp_gm_state');assert.equal(nativeState.lastFactReceipt.id,receiptA.id);assert.equal(nativeState.currentReceipt,null);
-  await f.service.rollbackStory({sessionId:f.id});assert.equal(f.forks.at(-1).atSeq,receiptA.source.turnStartSeq-1);assert.equal((await f.service.storyState({sessionId:f.id})).facts.items[0].text,'密封信件放在柜台上。');assert.equal(f.counts.factWrites,3);
+  const boundary=agent.events.findLast(event=>event.type==='turn/end'&&event.seq<receiptA.source.turnStartSeq).seq;await f.service.rollbackStory({sessionId:f.id});assert.equal(f.forks.at(-1).atSeq,boundary);assert.equal((await f.service.storyState({sessionId:f.id})).facts.items[0].text,'密封信件放在柜台上。');assert.equal(f.counts.factWrites,3);
 });
 test('historical receipt discovery still propagates dependency errors other than inactive source',async t=>{
   const f=await opened(t),state=await f.runTool(f.id,'rp_gm_state'),receipt=await f.runTool(f.id,'rp_commit_turn',{expectedRevision:state.revision,summary:'等待',packet:{playerAction:'等待'}}),original=f.db.factAccess;

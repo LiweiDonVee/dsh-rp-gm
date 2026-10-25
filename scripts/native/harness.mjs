@@ -10,7 +10,7 @@ async function* prose(text){yield {type:'block-start',index:0,blockType:'text'};
 function toolResults(messages){const calls=new Map();for(const message of messages)for(const block of Array.isArray(message.content)?message.content:[])if(block.type==='tool-call')calls.set(block.id,block.name);return messages.filter(message=>message.role==='tool').map(message=>{let value;try{value=JSON.parse(textOf(message));}catch{value=null;}return {name:calls.get(message.toolCallId),value,isError:message.isError};});}
 
 export async function apply(ctx){
-  const counts={gm:0,assembly:0,writer:0},requests=[],retryEvidence=[],disposers=[];let failWriter=false,retryCommit;
+  const counts={gm:0,assembly:0,writer:0},requests=[],retryEvidence=[],disposers=[];let failWriter=false,retryCommit,modelHold;
   const invoke=(method,request,signal)=>ctx.typertGateway.invoke({namespace:'session',method,args:{request},peer:ctx.connection.browserPeer,signal});
   const adapter={
     providerInfo:id=>({id,name:'GM native deterministic fixture'}),providerRetryPolicy:()=>undefined,imageRequestPricing:()=>undefined,imageRequestTarget:(_provider,_model,value)=>value,
@@ -19,6 +19,7 @@ export async function apply(ctx){
     async* stream(model,options){
       if(!Object.hasOwn(counts,model))throw Error('Unknown deterministic fixture model');if(++counts[model]>64)throw Error('GM_NATIVE_FIXTURE_REQUEST_LIMIT');
       requests.push({model,messageCount:options.messages.length,messages:structuredClone(model==='gm'?options.messages.slice(-12).map(message=>({...message,content:Array.isArray(message.content)?message.content.map(block=>block.type==='text'?{...block,text:block.text.slice(0,4000)}:block):message.content})):options.messages)});
+      if(modelHold?.model===model&&!modelHold.entered){modelHold.entered=true;await modelHold.wait;}
       if(model==='assembly'){yield*prose('{"commit":true}');return;}
       if(model==='writer'){if(failWriter)throw Error('GM_NATIVE_FORCED_WRITER_FAILURE');const input=JSON.parse(textOf(options.messages.findLast(message=>message.role==='user')));yield*prose(input.packet.playerAction.includes('把信交给林遥')?'林遥接过密封信，轻轻点头。信件现在由她保管。':'雨声仍在窗外持续，客栈里暂时安静下来。');return;}
       const messages=options.messages??[],human=messages.findLastIndex(message=>message.role==='user'&&['user','user-rpc'].includes(message.source?.kind)),action=textOf(messages[human]),results=toolResults(messages.slice(human+1)),last=name=>results.findLast(result=>result.name===name);
@@ -43,7 +44,8 @@ export async function apply(ctx){
     async function locked(index){
       if(index<ids.length){const agent=ctx.agents.get(ids[index]);return agent?agent.runMaintenance(()=>locked(index+1)):locked(index+1);}
       const revisions=Object.fromEntries(await Promise.all(Object.entries(owners).map(async([name,owner])=>[name,await owner.contentRevision({signal})]))),bindings=await Promise.all(ids.map(sessionId=>owners.gm.binding({sessionId,signal}))),states={};
-      states.database=await owners.database.exportState({sessionIds:ids,signal});states.lastStep=await owners.lastStep.exportState({sessionIds:ids,additionalProfileRefs:bindings.map(binding=>binding.profile),signal});states.gm=await owners.gm.exportState({sessionIds:ids,signal});
+      const initialSources=[...new Map(bindings.flatMap(binding=>binding.sources).map(({databaseId,version})=>[JSON.stringify([databaseId,version]),{databaseId,version}])).values()];
+      states.database=await owners.database.exportState({sessionIds:ids,additionalDatabaseRefs:initialSources,signal});states.lastStep=await owners.lastStep.exportState({sessionIds:ids,additionalProfileRefs:bindings.map(binding=>binding.profile),signal});states.gm=await owners.gm.exportState({sessionIds:ids,signal});
       const sessions=await Promise.all(ids.map(snapshot)),loopPolicies=await Promise.all(ids.map(async sessionId=>({sessionId,policy:(await ctx.get('loopStudio').inspect(sessionId,signal)).effectivePolicy}))),profiles=await Promise.all(ids.map(async sessionId=>({sessionId,binding:(await owners.lastStep.state(sessionId,signal)).binding})));
       for(const [name,owner]of Object.entries(owners))if(revisions[name].revision!==(await owner.contentRevision({signal})).revision)throw Error('Owner changed during fixture capture');
       return {sessionIds:ids,sessions,states,loopPolicies,profiles,initialProfiles:bindings.map(binding=>({sessionId:binding.sessionId,profile:binding.profile})),counts:{...counts}};
@@ -55,6 +57,11 @@ export async function apply(ctx){
       if(input.action==='ready'){const gm=ctx.get('rpGM'),last=ctx.get('rpLastStep');value={gm:gm?.apiVersion,database:ctx.get('rpDatabase')?.apiVersion,context:!!ctx.get('rpContext'),loop:!!ctx.get('loopStudio'),gmMethods:Object.fromEntries(['exportState','preflightRestore','restoreState','contentRevision'].map(key=>[key,typeof gm?.[key]==='function'])),lastStep:Object.fromEntries(['ensureBuiltinProfile','narratives','material','inheritSession','presentationSummaries','retryPresentation','exportState','preflightRestore','restoreState','contentRevision'].map(key=>[key,typeof last?.[key]==='function'])),presets:(await ctx.agentPresets.list()).filter(item=>item.id==='rp-gm')};}
       else if(input.action==='snapshot')value=await snapshot(input.sessionId);
       else if(input.action==='counters')value={counts,requests,retryEvidence};
+      else if(input.action==='holdWriter'){let release;const wait=new Promise(resolve=>{release=resolve;});modelHold={model:'writer',entered:false,wait,release};value={armed:true};}
+      else if(input.action==='modelHold')value={entered:modelHold?.entered===true};
+      else if(input.action==='releaseModel'){modelHold?.release();modelHold=undefined;value={released:true};}
+      else if(input.action==='queue'){value=await invoke('prompt',{sessionId:input.sessionId,requestId:input.requestId,mode:'queue',content:[{type:'text',text:input.text}]},request.signal);}
+      else if(input.action==='sessionIds'){await ctx.sessionPersistence.flush();value={live:ctx.agents.list().map(agent=>agent.session.id).sort(),stored:(await ctx.sessionPersistence.list()).map(item=>item.header.id).sort()};}
       else if(input.action==='retryNextCommit'){retryCommit=input.sessionId;value={enabled:true,mechanism:'Public tools/execute retry; first real result discarded'};}
       else if(input.action==='failWriter'){failWriter=input.enabled===true;value={failWriter};}
       else if(input.action==='prompt'){const receipt=await invoke('prompt',{sessionId:input.sessionId,requestId:input.requestId??randomUUID(),mode:'queue',content:[{type:'text',text:input.text}]},request.signal);await ctx.agents.get(input.sessionId).whenIdle();value={receipt,...await snapshot(input.sessionId)};}
@@ -66,6 +73,11 @@ export async function apply(ctx){
       else if(input.action==='summaries')value=await ctx.get('rpLastStep').presentationSummaries({sessionId:input.sessionId,signal:request.signal});
       else if(input.action==='retryLast'){const operation=await ctx.get('rpLastStep').retryPresentation({sessionId:input.sessionId,presentationId:input.presentationId,signal:request.signal});await ctx.agents.get(input.sessionId)?.whenIdle();value={operation,...await snapshot(input.sessionId)};}
       else if(input.action==='profileState'){const state=await ctx.get('rpLastStep').state(input.sessionId,request.signal);value={revision:state.revision,binding:state.binding,profiles:state.profiles,aggregate:await ctx.get('rpLastStep').contentRevision({signal:request.signal})};}
+      else if(input.action==='addDocumentSource'){
+        const db=ctx.get('rpDatabase'),before=await snapshot(input.sessionId),imported=await db.importDocument({name:'GM R23 owner notes',mimeType:'text/plain',text:'客栈资料：东侧客房今日关闭维修。此资料不改变信件持有人，也不代表新的故事行动。',requestId:'gm-native-r23-owner-document',expectedRevision:(await db.state({signal:request.signal})).revision,signal:request.signal}),library=await db.database({databaseId:imported.databaseId,version:1,signal:request.signal}),source={key:'owner-document',databaseId:library.database.id,version:library.database.version},sources=[...before.database.binding.sources.filter(item=>item.key!==source.key),source];
+        await db.bindSources({sessionId:input.sessionId,sources,expectedRevision:(await db.state({signal:request.signal})).revision,resetOverlay:false,signal:request.signal});value={imported,source,document:await db.document({documentId:imported.documentId,version:imported.version,signal:request.signal}),before,after:await snapshot(input.sessionId)};
+      }
+      else if(input.action==='document')value=await ctx.get('rpDatabase').document({documentId:input.documentId,version:input.version,signal:request.signal});
       else if(input.action==='style'){if(!['b','c'].includes(input.variant))throw Error('Unknown reviewed synthetic style');const last=ctx.get('rpLastStep'),profile=await last.ensureBuiltinProfile({key:`dsh-rp-gm.native-style.${input.variant}.v1`,profile:{name:`Native style ${input.variant.toUpperCase()}`,entries:[{id:'style',name:'Reviewed native style',role:'system',order:0,enabled:true,phase:'render',required:true,locked:true,content:`STYLE_${input.variant.toUpperCase()}: 使用简洁中文，严格保留已经提交的公开事实与玩家控制。`}]}}),before=await last.state(input.sessionId,request.signal);await last.bindSession({sessionId:input.sessionId,...profile,expectedRevision:before.revision},request.signal);value={profile,binding:(await last.state(input.sessionId,request.signal)).binding,initial:(await ctx.get('rpGM').binding({sessionId:input.sessionId})).profile};}
       else if(input.action==='receipt')value=await (await ctx.get('rpDatabase').factAccess({sessionId:input.sessionId,agent:ctx.agents.get(input.sessionId),signal:request.signal})).getReceipt(input.receiptId);
       else if(input.action==='exportGM')value=await ctx.get('rpGM').exportState({sessionIds:input.sessionIds,signal:request.signal});
