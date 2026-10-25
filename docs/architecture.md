@@ -1,0 +1,17 @@
+# GM-A architecture
+
+The plugin registers one public `rp-gm` preset. Its persona describes the native GM protocol; scope-bound tools are owned by each bound Agent. The preset, tools, prompt contexts, event observers, owner Connection routes and streams all have unload disposers.
+
+`core.mjs` validates immutable reviewed inputs and typed scene/facts. `session.mjs` derives actual assistant/tool/turn sources and folds effective surfaces, including compaction and content replacement. `store.mjs` has one atomic metadata writer queue per directory; it stores launch fingerprints and identities before invoking external startup steps. It never stores mutable fact entries.
+
+`host.mjs` resumes startup from durable checkpoints. The requested session ID is allocated before create and looked up before retrying create. A normal session/prompt uses one stable requestId. No product code appends Session events; the host creates its protected initial system head and owns all tool/call/result publication.
+
+`runtime.mjs` binds Database factAccess to actual session/Agent ownership. Fact source is `{assistantMessageId,callId,callSeq,turnStartSeq}` and turnKey is exactly JSON.stringify([sessionId,turnStartSeq]). Database persists the operation batch and receipt together. Opening tools accept no model seed. The metadata layer may retain only receipt/source pointers to recover a lost response. Inactive pointer lookups never revive a rewound receipt.
+
+Accepted opening detection prefers LastStep.narratives. The standalone parser verifies effective canonical tool identity and explicit `meta.rpLastStep.record.factReceiptId`; prose text is never evidence of opening. Receipt.kind is verified through the current story's Database facade. A new presentation is refused if its receipt is superseded or already has an accepted canonical narrative. LastStep handles same-context complete reservations and failed rewrite families before invoking the fresh-presentation seam.
+
+`branches.mjs` uses public session/fork; rollback chooses the prefix before the latest ordinary factual turn. The parent is preserved. LastStep.inheritSession owns historical profile/overlay selection, Database owns causal fact inheritance, Context owns its own projected plan. GM does not clone their internal stores. Reserved restore jobs gate play through native pre-step admission and direct factual/presentation operations; activation validates required state before clearing the matching gate.
+
+The native owner panel has a static original sample with two exact openings and a builtin LastStep profile containing only simple prose rules. Fixed character/persona source context is distinct from current Database facts. Optional service absence remains visible as an operation-specific diagnostic while the library is usable.
+
+GM-A tests run real GM modules and the real metadata filesystem against explicit frozen Database/LastStep/host fixtures. They prove this repository's behavior at its service boundaries. They do not prove actual rc.3 Session persistence, native model execution, final provider transfer or production LastStep behavior. GM-B must install packaged dependencies into an isolated official rc.3 home, reproduce native opening, letter transfer, failed writer/retry, cold restart and fork/rollback, and record actual counters and UI screenshots.

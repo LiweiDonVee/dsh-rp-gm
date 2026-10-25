@@ -1,0 +1,9 @@
+import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {gunzipSync} from 'node:zlib';import {createRequire} from 'node:module';import vm from 'node:vm';
+const root=new URL('../',import.meta.url),manifest=JSON.parse(await readFile(new URL('package.json',root),'utf8')),tar=gunzipSync(await readFile(new URL(`artifacts/${manifest.name}-${manifest.version}.tgz`,root))),entries=new Map();
+for(let offset=0;offset+512<=tar.length;){const header=tar.subarray(offset,offset+512),name=header.subarray(0,100).toString().split('\0')[0];if(!name)break;const size=parseInt(header.subarray(124,136).toString().replace(/\0/g,'').trim(),8)||0;entries.set(name,tar.subarray(offset+512,offset+512+size));offset+=512+Math.ceil(size/512)*512;}
+for(const name of ['package/package.json','package/dist/host.js','package/dist/client.js','package/cordis.patch.yml','package/README.md','package/LICENSE'])assert.ok(entries.has(name),name);
+assert.equal([...entries.keys()].some(name=>name.includes('/src/')||name.includes('/tests/')||name.includes('/.git/')),false);
+const packed=JSON.parse(entries.get('package/package.json'));for(const field of ['dependencies','devDependencies','peerDependencies','scripts'])assert.equal(packed[field],undefined);assert.equal(packed.main,'dist/host.js');
+const host=await import(new URL('dist/host.js',root));assert.equal(host.name,'rp-gm');assert.equal(typeof host.apply,'function');
+let client;const require=createRequire(import.meta.url);vm.runInNewContext(entries.get('package/dist/client.js').toString(),{window:{__ModuleLoader__:{load:value=>{assert.equal(value.id,'dsh-rp-gm');client=value.factory(require);}}}});assert.equal(typeof client.apply,'function');assert.equal(client.TAB_KIND,'rp-gm');
+process.stdout.write(`Verified ${entries.size} packed files; bundled host/client load independently.\n`);
