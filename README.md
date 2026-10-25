@@ -64,6 +64,8 @@ StoryKit 可在恢复前调用 plugin-only `reserveRestore`，占住已预检的
 
 `StoryBinding.profile` 记录开局固定版本，作为来源保留。后续换风格与前缀继承由 LastStep 保存当前绑定；GM 不把它改回开局风格。恢复须保留初始版本并验证 LastStep 实际当前绑定可用。
 
+`StoryBinding.sources` 同样只记录开局来源。当前资料组合从 Database 的 `effectiveV2` 读取；owner 追加文档或兼容重配后，GM 不同步第二份当前组合，也不会回绑开局列表。保存与恢复校验初始库的精确版本仍可读取，并验证 Database 当前注册事实、有效状态和真实回执。StoryKit 用已有 additionalDatabaseRefs 保留初始库版本。
+
 GM 的四个 transfer 方法只传自己的 metadata。完整故事保存与恢复由 StoryKit 协调各 owner 和公开宿主 persistence；不能只导入 GM 就报告故事恢复完成。跨存储恢复中断时保持执行门。若宿主已创建 Session 而协调器尚未记录创建归属即崩溃，不能仅因日志相同接管已有 ID，须保留冲突供 owner 处理。
 
 ## 服务与 owner 路由

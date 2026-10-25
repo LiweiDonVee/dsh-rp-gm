@@ -11,7 +11,7 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
     return [{type:'text',text:JSON.stringify({error})}];
   }
   const definitions=[
-    {name:'rp_gm_state',description:'Read the current scene, facts, Database revision and active receipt. binding.profile is initial launch provenance; LastStep owns the current writing style.',parameters:schema({}),method:'toolState'},
+    {name:'rp_gm_state',description:'Read the current scene, facts, Database revision and active receipt. binding.sources/profile are initial launch provenance; Database owns current sources and LastStep owns current writing style.',parameters:schema({}),method:'toolState'},
     {name:'rp_begin_story',description:'Commit the owner-selected opening once. The seed and exact text come from the story binding, never tool arguments.',parameters:schema({}),method:'begin'},
     {name:'rp_commit_turn',description:'Atomically commit this turn once, respecting human policies. Reuse its receipt if presentation fails.',parameters:schema({expectedRevision:{type:'integer',minimum:0},scene:{type:'object'},facts:{type:'object'},operations:{type:'array',items:{type:'object'}},summary:{type:'string'},packet:{type:'object'}},['expectedRevision','summary','packet']),method:'commit'},
   ];
