@@ -10,7 +10,7 @@ async function* prose(text){yield {type:'block-start',index:0,blockType:'text'};
 function toolResults(messages){const calls=new Map();for(const message of messages)for(const block of Array.isArray(message.content)?message.content:[])if(block.type==='tool-call')calls.set(block.id,block.name);return messages.filter(message=>message.role==='tool').map(message=>{let value;try{value=JSON.parse(textOf(message));}catch{value=null;}return {name:calls.get(message.toolCallId),value,isError:message.isError};});}
 
 export async function apply(ctx){
-  const counts={gm:0,assembly:0,writer:0},requests=[],retryEvidence=[],disposers=[];let failWriter=false,retryCommit;
+  const counts={gm:0,assembly:0,writer:0},requests=[],retryEvidence=[],disposers=[];let failWriter=false,retryCommit,modelHold;
   const invoke=(method,request,signal)=>ctx.typertGateway.invoke({namespace:'session',method,args:{request},peer:ctx.connection.browserPeer,signal});
   const adapter={
     providerInfo:id=>({id,name:'GM native deterministic fixture'}),providerRetryPolicy:()=>undefined,imageRequestPricing:()=>undefined,imageRequestTarget:(_provider,_model,value)=>value,
@@ -19,6 +19,7 @@ export async function apply(ctx){
     async* stream(model,options){
       if(!Object.hasOwn(counts,model))throw Error('Unknown deterministic fixture model');if(++counts[model]>64)throw Error('GM_NATIVE_FIXTURE_REQUEST_LIMIT');
       requests.push({model,messageCount:options.messages.length,messages:structuredClone(model==='gm'?options.messages.slice(-12).map(message=>({...message,content:Array.isArray(message.content)?message.content.map(block=>block.type==='text'?{...block,text:block.text.slice(0,4000)}:block):message.content})):options.messages)});
+      if(modelHold?.model===model&&!modelHold.entered){modelHold.entered=true;await modelHold.wait;}
       if(model==='assembly'){yield*prose('{"commit":true}');return;}
       if(model==='writer'){if(failWriter)throw Error('GM_NATIVE_FORCED_WRITER_FAILURE');const input=JSON.parse(textOf(options.messages.findLast(message=>message.role==='user')));yield*prose(input.packet.playerAction.includes('把信交给林遥')?'林遥接过密封信，轻轻点头。信件现在由她保管。':'雨声仍在窗外持续，客栈里暂时安静下来。');return;}
       const messages=options.messages??[],human=messages.findLastIndex(message=>message.role==='user'&&['user','user-rpc'].includes(message.source?.kind)),action=textOf(messages[human]),results=toolResults(messages.slice(human+1)),last=name=>results.findLast(result=>result.name===name);
@@ -56,6 +57,11 @@ export async function apply(ctx){
       if(input.action==='ready'){const gm=ctx.get('rpGM'),last=ctx.get('rpLastStep');value={gm:gm?.apiVersion,database:ctx.get('rpDatabase')?.apiVersion,context:!!ctx.get('rpContext'),loop:!!ctx.get('loopStudio'),gmMethods:Object.fromEntries(['exportState','preflightRestore','restoreState','contentRevision'].map(key=>[key,typeof gm?.[key]==='function'])),lastStep:Object.fromEntries(['ensureBuiltinProfile','narratives','material','inheritSession','presentationSummaries','retryPresentation','exportState','preflightRestore','restoreState','contentRevision'].map(key=>[key,typeof last?.[key]==='function'])),presets:(await ctx.agentPresets.list()).filter(item=>item.id==='rp-gm')};}
       else if(input.action==='snapshot')value=await snapshot(input.sessionId);
       else if(input.action==='counters')value={counts,requests,retryEvidence};
+      else if(input.action==='holdWriter'){let release;const wait=new Promise(resolve=>{release=resolve;});modelHold={model:'writer',entered:false,wait,release};value={armed:true};}
+      else if(input.action==='modelHold')value={entered:modelHold?.entered===true};
+      else if(input.action==='releaseModel'){modelHold?.release();modelHold=undefined;value={released:true};}
+      else if(input.action==='queue'){value=await invoke('prompt',{sessionId:input.sessionId,requestId:input.requestId,mode:'queue',content:[{type:'text',text:input.text}]},request.signal);}
+      else if(input.action==='sessionIds'){await ctx.sessionPersistence.flush();value={live:ctx.agents.list().map(agent=>agent.session.id).sort(),stored:(await ctx.sessionPersistence.list()).map(item=>item.header.id).sort()};}
       else if(input.action==='retryNextCommit'){retryCommit=input.sessionId;value={enabled:true,mechanism:'Public tools/execute retry; first real result discarded'};}
       else if(input.action==='failWriter'){failWriter=input.enabled===true;value={failWriter};}
       else if(input.action==='prompt'){const receipt=await invoke('prompt',{sessionId:input.sessionId,requestId:input.requestId??randomUUID(),mode:'queue',content:[{type:'text',text:input.text}]},request.signal);await ctx.agents.get(input.sessionId).whenIdle();value={receipt,...await snapshot(input.sessionId)};}

@@ -1,6 +1,7 @@
 import {clone,entryKey,fail,readState,requestFingerprint,text} from './core.mjs';
 import {acceptedFactPresentations} from './session.mjs';
 import {validateInitialSources} from './sources.mjs';
+import {rollbackBoundary} from './rollback.mjs';import {isDeepStrictEqual} from 'node:util';
 
 function restoreInput(input){text(input.restoreId,'Restore ID');if(!Array.isArray(input.sessionIds)||!input.sessionIds.length||new Set(input.sessionIds).size!==input.sessionIds.length||input.sessionIds.some(id=>typeof id!=='string'||!id.trim()))fail('INVALID_RESTORE','Restore requires distinct destination session IDs');return [...input.sessionIds].sort();}
 
@@ -16,10 +17,11 @@ export function createStoryBranches({ctx,store,runtime,database,readSession,noti
     }
     return latest;
   }
-  async function fork(input,atSeq){
-    await runtime.assertPlayable(input.sessionId);await runtime.inspect(input);const last=ctx.get('rpLastStep');
+  async function fork(input,atSeq,expected){
+    await runtime.assertPlayable(input.sessionId);const current=await runtime.inspect(input),last=ctx.get('rpLastStep');
     if(typeof last?.inheritSession!=='function')fail('LAST_STEP_INHERIT_UNAVAILABLE','RP LastStep with causal child profile inheritance is required',503);
     if(atSeq!==undefined&&(!Number.isSafeInteger(atSeq)||atSeq<0))fail('INVALID_PREFIX','Fork prefix must be a nonnegative canonical sequence');
+    if(expected&&(current.lastFactReceipt?.id!==expected.lastFactReceipt.id||rollbackBoundary(current.view,current.lastFactReceipt,current.record.opening?.receiptId)!==atSeq||!isDeepStrictEqual(current.view.events,expected.view.events)||!isDeepStrictEqual(current.agent.session.snapshotEvents(),current.view.events)))fail('ROLLBACK_UNAVAILABLE','Story input changed before rollback; inspect it again',409);
     const created=await ctx.typertGateway.invoke({namespace:'session',method:'fork',args:{request:{sessionId:input.sessionId,...atSeq===undefined?{}:{atSeq}}},peer:ctx.connection.browserPeer,signal:input.signal});
     const child=await readSession(created.sessionId,input.signal);if(child?.header.parentSession!==input.sessionId)fail('INVALID_ANCESTRY','Host did not return the requested child ancestry',409);
     await store.inherit(input.sessionId,created.sessionId);
@@ -33,8 +35,8 @@ export function createStoryBranches({ctx,store,runtime,database,readSession,noti
     forkStory:input=>fork(input,input.atSeq),
     async rollbackStory(input){
       await runtime.assertPlayable(input.sessionId);const current=await runtime.inspect(input),receipt=current.lastFactReceipt;
-      if(receipt?.kind!=='turn'||receipt.source.turnStartSeq<1||!current.view.events.some(event=>event.type==='system/message'&&event.seq<receipt.source.turnStartSeq))fail('ROLLBACK_UNAVAILABLE','No ordinary factual turn can be rolled back while preserving the opening',409);
-      return fork(input,receipt.source.turnStartSeq-1);
+      const atSeq=rollbackBoundary(current.view,receipt,current.record.opening?.receiptId);
+      return fork(input,atSeq,current);
     },
     async reserveRestore(input){const ids=restoreInput(input);await store.reserveRestore(input.restoreId,ids);for(const id of ids)notify(id);return {restoreId:input.restoreId,sessionIds:ids};},
     async activateRestored(input){

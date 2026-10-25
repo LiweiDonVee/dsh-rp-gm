@@ -27,8 +27,12 @@ export function nativeFixture(f){
     };
   };
   f.db.effectiveV2=async input=>(await f.db.factAccess({...input,agent:f.sessions.get(input.sessionId)})).snapshot();
+  f.startTurn=id=>{
+    const agent=f.sessions.get(id),message={id:randomUUID(),role:'user',source:{kind:'user',rpcId:randomUUID()},content:[{type:'text',text:'Fixture player action'}]},turn=(agent.events.findLast(event=>event.type==='turn/start')?.data.turn??0)+1;
+    const enqueue=f.append(agent,'agent/inbox/spliced',{target:'next-turn',start:0,inserted:[message]}),start=f.append(agent,'turn/start',{turn});f.append(agent,'agent/inbox/spliced',{target:'next-turn',start:0,removedCount:1,inserted:[]});f.append(agent,'step/start',{turn,step:1});f.append(agent,'user/message',clone(message),'append');return {enqueue,start,message};
+  };
   f.runTool=async(id,name,args={})=>{
-    const agent=f.sessions.get(id);f.ctx.currentAgent=agent;let start=agent.events.findLast(e=>e.type==='turn/start');const end=agent.events.findLast(e=>e.type==='turn/end');if(!start||(end&&end.seq>start.seq))start=f.append(agent,'turn/start',{turn:(start?.data.turn??0)+1});
+    const agent=f.sessions.get(id);f.ctx.currentAgent=agent;let start=agent.events.findLast(e=>e.type==='turn/start');const end=agent.events.findLast(e=>e.type==='turn/end');if(!start||(end&&end.seq>start.seq))start=f.startTurn(id).start;
     const turn=start.data.turn,step=agent.events.filter(e=>e.type==='assistant/message'&&e.data.turn===turn).length+1,callId=randomUUID();
     f.append(agent,'assistant/message',{turn,step,message:{id:randomUUID(),role:'assistant',content:[{type:'tool-call',id:callId,name,arguments:JSON.stringify(args)}]}},'append');const call=f.append(agent,'tool/call',{turn,step,callId,name,arguments:JSON.stringify(args)});
     const definition=agent.tools.get(name);if(!definition)throw Error(`Tool unavailable: ${name}`);let ended=false;

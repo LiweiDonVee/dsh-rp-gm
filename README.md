@@ -62,7 +62,7 @@ writer 失败后事实仍已提交。继续使用原事实回执；已有冻结�
 
 ## 分支、回退与恢复执行门
 
-`forkStory` 使用公开 session/fork。`rollbackStory` 选择最近普通事实回合的 turn/start 前一个有效前缀，创建子故事并保留原分支；不会删除原日志，也不会回退开场到非法空 head。子故事在 Database 前缀、LastStep 正确历史 profile/overlay 和可选 Context 计划就绪后才可继续。能力返回 `{rollback,fork,autoplay:false}`；通用 GM 没有旧 RP autoplay 驱动。
+`forkStory` 使用公开 session/fork。`rollbackStory` 沿真实 MessageId 和双队列入队／领取记录，选择目标事实回合输入最初入队前、队列为空的最新闭合前缀，创建子故事并保留原分支和所有先前完成的回合。若提前排队或共享输入无法用一个前缀隔离，返回 `ROLLBACK_UNAVAILABLE`，不创建子故事。不会清理私有 inbox、修改原日志或回退开场到非法空 head。子故事在 Database 前缀、LastStep 正确历史 profile/overlay 和可选 Context 计划就绪后才可继续。能力返回 `{rollback,fork,autoplay:false}`；通用 GM 没有旧 RP autoplay 驱动。
 
 StoryKit 可在恢复前调用 plugin-only `reserveRestore`，占住已预检的目标 ID。reserved/restoring 状态会拒绝原生 play；`activateRestored` 必须验证同一 job 的绑定、真实 Agent、Database 状态、当前 ready profile 和应有的 canonical 开场，再解除执行门。两个方法不提交 prompt 或重播开场。
 
