@@ -31,3 +31,15 @@ test('an imported draft cannot become the default-ready profile through story st
   const f=await contractFixture(t),profile=await f.last.ensureBuiltinProfile({key:'draft-fixture',profile:{name:'Imported draft',entries:[]}});f.profiles.get('draft-fixture').status='draft';
   const service=await createGmHost(f.ctx,f.options);t.after(()=>service.close());await assert.rejects(service.startStory(launch({profile})),{code:'PROFILE_NOT_READY'});assert.equal(f.counts.creates,0);
 });
+test('ordinary Database startup uses public state revision without the optional content-transfer API',async t=>{
+  const f=await contractFixture(t);delete f.db.contentRevision;const service=await createGmHost(f.ctx,f.options);t.after(()=>service.close());
+  const started=await service.startStory(launch());assert.equal(started.status,'starting');assert.equal(f.counts.binds,1);assert.equal(f.counts.initializes,1);assert.equal(f.counts.prompts,1);
+});
+test('legacy LastStep profile binding stays in the preset revision domain after aggregate revisions diverge',async t=>{
+  const f=await contractFixture(t);f.last.contentRevision=async()=>({revision:999});const service=await createGmHost(f.ctx,f.options);t.after(()=>service.close());assert.equal((await service.startStory(launch())).status,'starting');assert.equal(f.counts.profileBinds,1);
+});
+test('partial startup recovery preserves an already chosen ready owner style instead of binding the initial style again',async t=>{
+  const f=await contractFixture(t),bind=f.last.bindSession;let lost=true;f.last.bindSession=async input=>{const result=await bind(input);if(lost){lost=false;throw Object.assign(Error('Lost profile acknowledgement'),{code:'LOST_RESPONSE'});}return result;};const service=await createGmHost(f.ctx,f.options);t.after(()=>service.close());
+  await assert.rejects(service.startStory(launch()),{code:'LOST_RESPONSE'});const id=[...f.sessions.keys()][0];f.profiles.set('style-b',{id:'style-b',name:'Owner style B',version:1,status:'ready',sourceId:null,entries:[]});await f.last.bindSession({sessionId:id,profileId:'style-b',version:1,expectedRevision:(await f.last.state(id)).revision});const before=f.counts.profileBinds;
+  const resumed=await service.startStory(launch());assert.equal(resumed.binding.profile.profileId,'builtin');assert.equal((await f.last.state(id)).binding.profileId,'style-b');assert.equal(f.counts.profileBinds,before);assert.equal(f.counts.prompts,1);
+});

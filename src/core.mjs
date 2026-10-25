@@ -16,6 +16,13 @@ function asset(value,persona=false) {
   const fixed={};if(!persona)for(const key of ['description','personality','scenario'])if(value[key]!==undefined)fixed[key]=text(value[key],`Character ${key}`,true);
   return {assetId:text(value.assetId,'Asset ID'),version:positive(value.version,'Asset'),name:text(value.name,'Asset name'),...persona?{description:text(value.description,'Persona description',true)}:fixed};
 }
+export const normalizeCharacter=value=>asset(value);
+export const normalizePersona=value=>asset(value,true);
+export function normalizeSources(value){
+  if(!Array.isArray(value))fail('INVALID_STORY','Sources must be a binding array');const used=new Set();
+  return value.map(source=>{keys(source,['key','databaseId','version']);const key=text(source.key,'Source key');if(key==='@session'||used.has(key))fail('INVALID_STORY','Source keys must be distinct owner slots');used.add(key);return {key,databaseId:text(source.databaseId,'Database ID'),version:positive(source.version,'Source')};});
+}
+export function normalizeProfileRef(value){keys(value,['profileId','version']);return {profileId:text(value.profileId,'Profile ID'),version:positive(value.version,'Profile')};}
 export function normalizeScene(value) {
   keys(value,['schemaVersion','title','location','time','presentActorIds']);
   if(value.schemaVersion!==1)fail('INVALID_STORY','Scene schemaVersion must be 1');
@@ -29,9 +36,8 @@ export function normalizeFacts(value) {
 export function normalizeStart(value) {
   keys(value,['launchId','title','character','persona','opening','examples','sources','profile','initialScene','initialFacts','signal']);
   keys(value.opening,['id','text']);
-  if(!Array.isArray(value.sources))fail('INVALID_STORY','Sources must be a binding array');
-  const used=new Set();const sources=value.sources.map(source=>{keys(source,['key','databaseId','version']);const key=text(source.key,'Source key');if(key==='@session'||used.has(key))fail('INVALID_STORY','Source keys must be distinct owner slots');used.add(key);return {key,databaseId:text(source.databaseId,'Database ID'),version:positive(source.version,'Source')};});
-  let profile;if(value.profile!==undefined){keys(value.profile,['profileId','version']);profile={profileId:text(value.profile.profileId,'Profile ID'),version:positive(value.profile.version,'Profile')};}
+  const sources=normalizeSources(value.sources);
+  const profile=value.profile===undefined?undefined:normalizeProfileRef(value.profile);
   return freeze({launchId:text(value.launchId,'Launch ID'),title:text(value.title,'Story title'),character:asset(value.character),persona:asset(value.persona,true),opening:{id:text(value.opening.id,'Opening ID'),text:text(value.opening.text,'Opening text')},examples:text(value.examples??'','Examples',true),sources,...profile?{profile}:{},initialScene:normalizeScene(value.initialScene),initialFacts:normalizeFacts(value.initialFacts)});
 }
 function stable(value) {return Array.isArray(value)?value.map(stable):object(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])):value;}

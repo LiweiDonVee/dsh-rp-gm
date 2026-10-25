@@ -1,16 +1,64 @@
 {
-  "name": "dsh-rp-gm", "version": "0.1.0", "description": "通用原生 RP GM、故事开局与事实提交",
-  "license": "MIT", "type": "module", "main": "dist/host.js",
-  "exports": {".": "./dist/host.js", "./client": "./dist/client.js", "./package.json": "./package.json"},
-  "files": ["dist", "cordis.patch.yml", "README.md", "LICENSE"],
-  "engines": {"node": ">=24", "dsh": ">=0.2.1-rc.3 <0.3.0-0"},
-  "dsh": {"bundle": {"patch": "./cordis.patch.yml"}, "client": {"inject": ["@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar-right", "@deepseek-ai/dsh-client-ui-workspace"], "platform": "web"}},
-  "scripts": {
-    "lint": "oxlint src tests scripts vitest.config.js --deny-warnings", "test:host": "node --test tests/*.test.mjs",
-    "test:ui": "vitest run", "test": "pnpm test:host && pnpm test:ui", "build": "node scripts/build.mjs",
-    "check": "pnpm lint && pnpm test && pnpm build", "package": "pnpm build && node scripts/pack.mjs && node scripts/verify-package.mjs"
+  "name": "dsh-rp-gm",
+  "version": "0.1.0",
+  "description": "通用原生 RP GM、故事开局与事实提交",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/host.js",
+  "exports": {
+    ".": "./dist/host.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json"
   },
-  "peerDependencies": {"react": "^18.3.1"},
-  "devDependencies": {"@testing-library/jest-dom": "^6.6.3", "@testing-library/react": "^16.1.0", "esbuild": "^0.28.2", "jsdom": "^26.1.0", "oxlint": "^1.78.0", "react": "^18.3.1", "react-dom": "^18.3.1", "vitest": "^4.1.11"},
-  "packageManager": "pnpm@11.9.0", "repository": {"type": "git", "url": "git+https://github.com/LiweiDonVee/dsh-rp-gm.git"}
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24",
+    "dsh": ">=0.2.1-rc.3 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "lint": "oxlint src tests scripts vitest.config.js --deny-warnings",
+    "test:host": "node --test tests/*.test.mjs",
+    "test:ui": "vitest run",
+    "test": "pnpm test:host && pnpm test:ui",
+    "build": "node scripts/build.mjs",
+    "check": "pnpm lint && pnpm test && pnpm build",
+    "package": "pnpm build && node scripts/pack.mjs && node scripts/verify-package.mjs"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^26.1.0",
+    "oxlint": "^1.78.0",
+    "playwright": "1.62.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LiweiDonVee/dsh-rp-gm.git"
+  }
 }

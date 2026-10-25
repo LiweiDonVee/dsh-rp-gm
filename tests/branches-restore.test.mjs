@@ -15,13 +15,13 @@ test('fork initializes optional Context plan and refuses missing LastStep inheri
 });
 test('restore reservation is exclusive and blocks native play without writing facts or prompts',async t=>{
   const f=await opened(t),writes=f.counts.factWrites,prompts=f.counts.prompts;await f.service.reserveRestore({restoreId:'restore-one',sessionIds:[f.id,'destination']});
-  await f.service.reserveRestore({restoreId:'restore-one',sessionIds:[f.id,'destination']});await assert.rejects(f.service.reserveRestore({restoreId:'other-job',sessionIds:[f.id]}),{code:'RESTORE_CONFLICT'});
+  await f.service.reserveRestore({restoreId:'restore-one',sessionIds:[f.id,'destination']});await assert.rejects(f.service.reserveRestore({restoreId:'other-job',sessionIds:[f.id]}),{code:'RESTORE_ID_CONFLICT'});
   await assert.rejects(f.runTool(f.id,'rp_begin_story'),{code:'STORY_RESTORING'});assert.deepEqual((await f.service.storyState({sessionId:f.id})).capabilities,{rollback:false,fork:false,autoplay:false});assert.equal(f.counts.factWrites,writes);assert.equal(f.counts.prompts,prompts);
   await assert.rejects(f.service.activateRestored({restoreId:'restore-one',sessionIds:[f.id,'destination']}),{code:'RESTORE_INCOMPLETE'});await assert.rejects(f.runTool(f.id,'rp_begin_story'),{code:'STORY_RESTORING'});
 });
 test('activation validates restored state and profile then clears only matching execution gate without replay',async t=>{
   const f=await opened(t),before={writes:f.counts.factWrites,prompts:f.counts.prompts,initializes:f.counts.initializes};await f.service.reserveRestore({restoreId:'restore-one',sessionIds:[f.id]});
-  await assert.rejects(f.service.activateRestored({restoreId:'wrong',sessionIds:[f.id]}),{code:'RESTORE_CONFLICT'});await f.service.activateRestored({restoreId:'restore-one',sessionIds:[f.id]});
+  await assert.rejects(f.service.activateRestored({restoreId:'wrong',sessionIds:[f.id]}),{code:'RESTORE_ID_CONFLICT'});await f.service.activateRestored({restoreId:'restore-one',sessionIds:[f.id]});
   assert.equal((await f.service.binding({sessionId:f.id})).status,'active');assert.equal((await f.runTool(f.id,'rp_begin_story')).kind,'opening');assert.deepEqual({writes:f.counts.factWrites,prompts:f.counts.prompts,initializes:f.counts.initializes},before);
 });
 test('a child with failed profile inheritance cannot become playable merely by reading its canonical opening',async t=>{

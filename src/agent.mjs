@@ -4,9 +4,14 @@ const schema=(properties,required=[])=>({type:'object',properties,required,addit
 const output={schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
 
 export async function registerGmAgent(ctx,runtime,contextFor) {
-  const scopes=new Map(),cache=new WeakMap(),disposers=[];let stopped=false;
+  const scopes=new Map(),cache=new WeakMap(),errors=new WeakMap(),disposers=[];let stopped=false;
+  function finalizeContent(exec,result){
+    const error=errors.get(exec);errors.delete(exec);
+    if(!error||result.isError!==true||result.error?.message!==error.message||result.content?.length!==1||result.content[0].type!=='text'||result.content[0].text!==`Error: ${error.message}`)return;
+    return [{type:'text',text:JSON.stringify({error})}];
+  }
   const definitions=[
-    {name:'rp_gm_state',description:'Read the current story scene, established facts, Database revision and active factual receipt.',parameters:schema({}),method:'toolState'},
+    {name:'rp_gm_state',description:'Read the current scene, facts, Database revision and active receipt. binding.profile is initial launch provenance; LastStep owns the current writing style.',parameters:schema({}),method:'toolState'},
     {name:'rp_begin_story',description:'Commit the owner-selected opening once. The seed and exact text come from the story binding, never tool arguments.',parameters:schema({}),method:'begin'},
     {name:'rp_commit_turn',description:'Atomically commit this turn once, respecting human policies. Reuse its receipt if presentation fails.',parameters:schema({expectedRevision:{type:'integer',minimum:0},scene:{type:'object'},facts:{type:'object'},operations:{type:'array',items:{type:'object'}},summary:{type:'string'},packet:{type:'object'}},['expectedRevision','summary','packet']),method:'commit'},
   ];
@@ -15,9 +20,10 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
     const record={tools:[],restriction:undefined,life:new AbortController()};scopes.set(agent,record);
     let bound;try{bound=await runtime.ensure(agent,record.life.signal);}catch(error){if(record.life.signal.aborted)return;scopes.delete(agent);throw error;}if(stopped||scopes.get(agent)!==record)return;
     if(bound&&ctx.tools.get('run_code',agent)===undefined){
-      for(const definition of definitions)record.tools.push(agent.ctx.tools.register({...definition,output,execute:async(args,exec)=>{
-        if(!object(args)||Object.keys(args).some(key=>!Object.hasOwn(definition.parameters.properties,key)))fail('INVALID_TOOL_ARGUMENTS','Unexpected GM tool arguments');
-        exec.signal.throwIfAborted();return definition.method==='commit'?runtime.commit(args,exec):runtime[definition.method](exec);
+      for(const definition of definitions)record.tools.push(agent.ctx.tools.register({...definition,output,finalizeContent,execute:async(args,exec)=>{
+        try{if(!object(args)||Object.keys(args).some(key=>!Object.hasOwn(definition.parameters.properties,key)))fail('INVALID_TOOL_ARGUMENTS','Unexpected GM tool arguments');
+          exec.signal.throwIfAborted();return await (definition.method==='commit'?runtime.commit(args,exec):runtime[definition.method](exec));
+        }catch(error){if(['GmError','DatabaseError','PresetError'].includes(error?.name)&&typeof error.code==='string'&&typeof error.message==='string')errors.set(exec,{code:error.code,message:error.message,...typeof error.receiptId==='string'?{receiptId:error.receiptId}:{}});throw error;}
       }}));
     }else{const inherited=TOOL_NAMES.filter(name=>ctx.tools.get(name,agent)!==undefined);if(inherited.length)record.restriction=agent.ctx.tools.restrict({deny:inherited});}
   }

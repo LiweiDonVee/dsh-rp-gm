@@ -36,4 +36,10 @@ describe('native GM workspace',()=>{
     render(<GmWorkspace api={api} sessionId="story-a"/>);fireEvent.click(await screen.findByRole('button',{name:'查看 故事乙'}));await screen.findByText('故事乙的信件在门口。');
     await act(async()=>{pending.reject(Error('故事甲的迟到错误'));});expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByText('故事乙的信件在门口。')).toBeInTheDocument();
   });
+  it('keeps the latest owner selection when an older startSample response arrives',async()=>{
+    const pending=deferred(),other={...state,binding:{...state.binding,title:'故事乙'},facts:{items:[{id:'holder',text:'故事乙的信件在门口。'}]}};
+    const api={library:async()=>twoStories,startSample:()=>pending.promise,state:id=>Promise.resolve(id==='story-b'?other:state),subscribe:()=>()=>{}};
+    render(<GmWorkspace api={api}/>);fireEvent.click(await screen.findByRole('button',{name:'开始所选故事'}));fireEvent.click(screen.getByRole('button',{name:'查看 故事乙'}));await screen.findByText('故事乙的信件在门口。');
+    await act(async()=>{pending.resolve({sessionId:'story-a',status:'starting'});});expect(screen.getByText('story-b')).toBeInTheDocument();expect(screen.queryByText('story-a')).not.toBeInTheDocument();expect(screen.getByText('故事乙的信件在门口。')).toBeInTheDocument();
+  });
 });

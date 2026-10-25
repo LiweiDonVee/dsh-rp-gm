@@ -5,6 +5,7 @@ import {BUILTIN_PROFILE,BUILTIN_PROFILE_KEY,GM_PROTOCOL} from './profile.mjs';
 import {createGmRuntime} from './runtime.mjs';import {registerGmAgent} from './agent.mjs';
 import {createGmRoutes} from './routes.mjs';
 import {createStoryBranches} from './branches.mjs';
+import {createGmTransfer} from './transfer.mjs';
 
 export const name='rp-gm';
 export const inject=['connection','typertGateway','agents','tools','systemPrompt','agentPresets'];
@@ -21,6 +22,7 @@ export async function createGmHost(ctx,options={}) {
   async function bound(id,agent,signal){const view=await viewFor(id,agent,signal);if(!view)return null;let record=await store.binding(id);if(!record&&view.header?.agentPreset===PRESET_ID&&view.header?.parentSession){const parent=await bound(view.header.parentSession,undefined,signal);if(parent)record=await store.inherit(view.header.parentSession,id);}return record;}
   const runtime=createGmRuntime({ctx,store,database,bound,viewFor,notify});
   const branches=createStoryBranches({ctx,store,runtime,database,readSession,notify});
+  const transfer=createGmTransfer({ctx,store,readSession,notify});
   const result=record=>({binding:freeze(clone(record.binding)),sessionId:record.binding.sessionId,status:record.binding.status});
   async function start(request,signal){
     let journal=await store.reserve(request),record=await store.binding(journal.sessionId);
@@ -37,9 +39,9 @@ export async function createGmHost(ctx,options={}) {
       if(!snapshot){const created=await ctx.typertGateway.invoke({namespace:'session',method:'create',args:{request:{sessionId:journal.sessionId,agentPreset:PRESET_ID}},peer:ctx.connection.browserPeer,signal});if(created.sessionId!==journal.sessionId)fail('SESSION_CONFLICT','Host did not retain the reserved session identity',409);}
       if(ctx.tools.get('run_code',ctx.agents.get(journal.sessionId))!==undefined)fail('NATIVE_TOOLS_REQUIRED','Configure native tools before starting a GM story',409);
       if(!journal.progress.created)journal=await store.checkpoint(request.launchId,'created');
-      if(!journal.progress.sources){await db.bindSources({sessionId:journal.sessionId,sources:clone(request.sources),expectedRevision:(await db.contentRevision({signal})).revision,resetOverlay:false,signal});journal=await store.checkpoint(request.launchId,'sources');}
-      if(!journal.progress.initialized){await db.initializeStoryState({sessionId:journal.sessionId,entries:seedEntries(request),factEntryRefs:clone(record.binding.factEntryRefs),launchId:request.launchId,expectedRevision:(await db.contentRevision({signal})).revision,signal});journal=await store.checkpoint(request.launchId,'initialized');}
-      if(!journal.progress.profile){const state=await last.state(journal.sessionId,signal);if(state.binding?.profileId!==profile.profileId||state.binding.version!==profile.version)await last.bindSession({sessionId:journal.sessionId,...profile,expectedRevision:state.revision},signal);journal=await store.checkpoint(request.launchId,'profile');}
+      if(!journal.progress.sources){await db.bindSources({sessionId:journal.sessionId,sources:clone(request.sources),expectedRevision:(await db.state({signal})).revision,resetOverlay:false,signal});journal=await store.checkpoint(request.launchId,'sources');}
+      if(!journal.progress.initialized){await db.initializeStoryState({sessionId:journal.sessionId,entries:seedEntries(request),factEntryRefs:clone(record.binding.factEntryRefs),launchId:request.launchId,expectedRevision:(await db.state({signal})).revision,signal});journal=await store.checkpoint(request.launchId,'initialized');}
+      if(!journal.progress.profile){const state=await last.state(journal.sessionId,signal);if(state.binding){const current=await last.profile({profileId:state.binding.profileId,version:state.binding.version},signal);if(current.profile?.status!=='ready')fail('PROFILE_NOT_READY','The current owner-selected style is not ready',409);}else await last.bindSession({sessionId:journal.sessionId,...profile,expectedRevision:state.revision},signal);journal=await store.checkpoint(request.launchId,'profile');}
       await store.setStatus(journal.sessionId,'starting');
       const agent=ctx.agents.get(journal.sessionId);if(agent)await adapter?.sync(agent);
       snapshot=await readSession(journal.sessionId,signal);
@@ -57,6 +59,10 @@ export async function createGmHost(ctx,options={}) {
     rollbackStory:input=>run(input.signal,signal=>branches.rollbackStory({...input,signal})),
     reserveRestore:input=>run(input.signal,signal=>branches.reserveRestore({...input,signal})),
     activateRestored:input=>run(input.signal,signal=>branches.activateRestored({...input,signal})),
+    exportState:input=>run(input.signal,signal=>transfer.exportState({...input,signal})),
+    preflightRestore:input=>run(input.signal,signal=>transfer.preflightRestore({...input,signal})),
+    restoreState:input=>run(input.signal,signal=>transfer.restoreState({...input,signal})),
+    contentRevision:(input={})=>run(input.signal,()=>transfer.contentRevision()),
     listStories:({signal}={})=>run(signal,async()=>({stories:(await store.bindings()).map(({binding})=>({sessionId:binding.sessionId,title:binding.title,status:binding.status,character:binding.character,persona:binding.persona}))})),
     diagnostics:()=>run(undefined,async()=>({database:ctx.get('rpDatabase')?.apiVersion===2,lastStep:typeof ctx.get('rpLastStep')?.ensureBuiltinProfile==='function',context:!!ctx.get('rpContext'),loop:!!ctx.get('loopStudio')})),
     subscribe(id,fn){const set=subscribers.get(id)??new Set();set.add(fn);subscribers.set(id,set);return()=>{set.delete(fn);if(!set.size)subscribers.delete(id);};},

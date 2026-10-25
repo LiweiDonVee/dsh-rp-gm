@@ -1,4 +1,4 @@
-# GM-A architecture
+# GM architecture
 
 The plugin registers one public `rp-gm` preset. Its persona describes the native GM protocol; scope-bound tools are owned by each bound Agent. The preset, tools, prompt contexts, event observers, owner Connection routes and streams all have unload disposers.
 
@@ -16,4 +16,14 @@ A restoring child remains gated during ordinary binding/state observations. Only
 
 The native owner panel has a static original sample with two exact openings and a builtin LastStep profile containing only simple prose rules. Fixed character/persona source context is distinct from current Database facts. Optional service absence remains visible as an operation-specific diagnostic while the library is usable.
 
-GM-A tests run real GM modules and the real metadata filesystem against explicit frozen Database/LastStep/host fixtures. They prove this repository's behavior at its service boundaries. They do not prove actual rc.3 Session persistence, native model execution, final provider transfer or production LastStep behavior. GM-B must install packaged dependencies into an isolated official rc.3 home, reproduce native opening, letter transfer, failed writer/retry, cold restart and fork/rollback, and record actual counters and UI screenshots.
+`transfer-schema.mjs` validates the owner envelope, fixed binding/launch fields, identities and ancestor closure. `transfer.mjs` exports only selected metadata, checking idle Agents, an atomic store snapshot and unchanged canonical source/revision. The coordinator owns cross-owner `Agent.runMaintenance`; GM never acquires it recursively. Cold snapshots use authenticated owner readers without manufacturing an Agent.
+
+Restore checks the existing restore identity before deeper schema/revision/proof work. The same store queue validates real imported headers/events, Database effective sources/refs and LastStep canonical opening narratives before a single atomic merge. Failed proof does not reserve a payload fingerprint or increase revision. Existing unrelated bindings survive. The coordinator's explicit reservation is a separate earlier execution gate.
+
+Pre-resume proof uses Database.effectiveV2 and LastStep owner methods. After safe no-prompt resume, activation uses the actual registered Agent's factAccess to validate current receipts, kind, ownership, active sources and state-ref versions. A parent-future lastReceiptId hint absent from the child prefix does not override the actual current receipt. Current/opening evidence must still pass. Partial restore remains gated; no historical model/tool replay occurs.
+
+StoryBinding.profile is immutable launch provenance. Export/restore require its exact retained version; the coordinator includes it using LastStep.exportState additionalProfileRefs. Actual style/overlay comes exclusively from LastStep.state and LastStep.inheritSession. Activation validates that current binding's ready profile and native admission, allowing a legitimate owner rebind to another ready style.
+
+Native error presentation uses the public tool definition.finalizeContent(exec,result). Known safe kernel errors preserve the native error outcome while projecting code/message/receiptId into untouched default content. The SDK's error/meta/value and post-policy content remain authoritative; unknown errors and redactions are not rewritten.
+
+Unit/service tests use explicit fixtures. The separate scripts/native fixture installs immutable SHA-named tgz inputs in isolated official rc.3 homes. Only its local model adapter and explicit fault injection are synthetic. Product GM/Database/LastStep/Loop services, native tool execution, canonical persistence, fork/rollback and owner transfer run from actual installed artifacts. Its transport coordinator is test infrastructure; StoryKit supplies the complete product save/restore workflow.
