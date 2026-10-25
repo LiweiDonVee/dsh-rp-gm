@@ -2,7 +2,7 @@
 
 一个供所有故事共用的原生 GM 插件。选择已审阅的角色、玩家身份与开场后，主 Agent 决定并提交事实，Database 保存状态，LastStep 呈现正文；Context 可选参与选材。无需为每张卡编写 runtime。
 
-当前是 **0.1.0 / GM-B 开发检查点**，尚未发布。包含独立 owner 状态传输与恢复执行门。真实 rc.3 验收使用已打包的 Database、LastStep、Loop 和本地确定性模型；具体版本、SHA 与运行记录见 [原生验收](docs/native-acceptance.md)。
+**0.1.0** 提供通用 GM 开局、原子事实提交、状态投影、分支／回退，以及独立 owner 状态传输与恢复执行门。具体受测版本、SHA 和验证范围见 [验收证据](docs/native-acceptance.md)。
 
 ## 安装与依赖
 
@@ -10,22 +10,26 @@
 |---|---|
 | 官方 DSH | `0.2.1-rc.3` 起的受支持 0.2.x；本插件未验收 rc.2 |
 | Node.js | 24 或更新受支持版本 |
-| RP Database | 本轮 `0.2.0`，提供 `apiVersion === 2`、原子事实回执与 v2 来源绑定 |
-| RP LastStep | 本轮 `0.3.0`，提供事实回执呈现、builtin profile 与因果分支继承 |
-| RP Context | 可选，本轮 `0.2.0`，通过材料 facade 选材 |
-| Loop Studio | 可选，已有 `0.1.0`；沿用主 Agent 的模型路由 |
+| [RP Database 0.2.0](https://github.com/LiweiDonVee/dsh-rp-database/releases/tag/v0.2.0) | 必需，提供 `apiVersion === 2`、原子事实回执与 v2 来源绑定 |
+| [RP LastStep 0.3.0](https://github.com/LiweiDonVee/dsh-rp-last-step/releases/tag/v0.3.0) | 必需，提供事实回执呈现、builtin profile 与因果分支继承 |
+| [RP Context 0.2.0](https://github.com/LiweiDonVee/dsh-rp-context/releases/tag/v0.2.0) | 可选，通过材料 facade 选材 |
+| [Loop Studio 0.1.0](https://github.com/LiweiDonVee/dsh-loop-studio/releases/tag/v0.1.0) | 可选，沿用主 Agent 的模型路由 |
 
-先安装对应 Database 与 LastStep 版本。完全退出 DSH 后，将独立构建的 tarball 加入目标 profile，再重启：
+从 [0.1.0 发布页](https://github.com/LiweiDonVee/dsh-rp-gm/releases/tag/v0.1.0) 下载 [dsh-rp-gm-0.1.0.tgz](https://github.com/LiweiDonVee/dsh-rp-gm/releases/download/v0.1.0/dsh-rp-gm-0.1.0.tgz)，并从上表发布页下载 Database 和 LastStep 的对应 tgz。将三个文件放在同一下载目录，在该目录打开终端；完全退出 DSH 后安装，再重启：
 
 ```powershell
-dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.1.0.tgz
+dsh plugin --profile desktop add ./dsh-rp-database-0.2.0.tgz
+dsh plugin --profile desktop add ./dsh-rp-last-step-0.3.0.tgz
+dsh plugin --profile desktop add ./dsh-rp-gm-0.1.0.tgz
 ```
 
 Web profile 将 desktop 改为 web。Windows 未配置 PATH 时，可用官方启动器：
 
 ```powershell
 $gmCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd'
-& $gmCli plugin --profile desktop add ./artifacts/dsh-rp-gm-0.1.0.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-database-0.2.0.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-last-step-0.3.0.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-gm-0.1.0.tgz
 ```
 
 在宿主正常配置页选择可用的主模型，并将 tools 模式设为 native。writer／模块组装模型沿用 LastStep 的配置和可选 Loop 路由。GM 不保存 provider 凭据，也不自带付费模型配置。本地模型验收覆盖实际工具、日志与 owner 服务；故事质量仍取决于选用的模型。
@@ -66,7 +70,7 @@ StoryKit 可在恢复前调用 plugin-only `reserveRestore`，占住已预检的
 
 `StoryBinding.sources` 同样只记录开局来源。当前资料组合从 Database 的 `effectiveV2` 读取；owner 追加文档或兼容重配后，GM 不同步第二份当前组合，也不会回绑开局列表。保存与恢复校验初始库的精确版本仍可读取，并验证 Database 当前注册事实、有效状态和真实回执。StoryKit 用已有 additionalDatabaseRefs 保留初始库版本。
 
-GM 的四个 transfer 方法只传自己的 metadata。完整故事保存与恢复由 StoryKit 协调各 owner 和公开宿主 persistence；不能只导入 GM 就报告故事恢复完成。跨存储恢复中断时保持执行门。若宿主已创建 Session 而协调器尚未记录创建归属即崩溃，不能仅因日志相同接管已有 ID，须保留冲突供 owner 处理。
+GM 的四个 transfer 方法只传自己的 metadata。完整故事保存与恢复由 StoryKit 协调各 owner 和公开宿主 persistence；不能只导入 GM 就报告故事恢复完成。新建目标须先追加完整原事件并 flush，再记录创建归属，随后完成读取和冷校验；创建检查点不等于恢复完成。跨存储恢复中断时保持执行门。若宿主已创建 Session 而协调器尚未记录创建归属即崩溃，不能仅因日志相同接管已有 ID，须保留冲突供 owner 处理。
 
 ## 服务与 owner 路由
 
@@ -108,6 +112,6 @@ pnpm check
 pnpm package
 ```
 
-package 生成 `artifacts/dsh-rp-gm-0.1.0.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门和原生面板。真实隔离 home 验收入口见 [native runner](scripts/native/README.md)。
+package 生成 `artifacts/dsh-rp-gm-0.1.0.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.1.0.tgz`；依赖仍按上面的下载步骤安装。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门和原生面板。真实隔离 home 验收入口见 [native runner](scripts/native/README.md)。
 
 MIT License。
