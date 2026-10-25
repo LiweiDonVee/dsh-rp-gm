@@ -1,3 +1,4 @@
+import {isDeepStrictEqual} from 'node:util';
 import {clone,entryKey,fail,readState,requestFingerprint} from './core.mjs';
 import {acceptedFactPresentations,projectSession} from './session.mjs';
 import {envelope,normalizeState,sessionIds} from './transfer-schema.mjs';
@@ -5,7 +6,7 @@ import {envelope,normalizeState,sessionIds} from './transfer-schema.mjs';
 const required=message=>fail('RESTORE_REQUIREMENT_MISSING',message,409);
 const invalid=message=>fail('RESTORE_PAYLOAD_INVALID',message,400);
 const sameRefs=(left,right)=>requestFingerprint(left.map(entryKey).sort())===requestFingerprint(right.map(entryKey).sort());
-function sourceIdentity(snapshot){const header=clone(snapshot.header);if(header.delegationDepth===undefined)header.delegationDepth=0;return requestFingerprint({header,events:snapshot.events});}
+function sourceIdentity(snapshot){const header=clone(snapshot.header);if(header.delegationDepth===undefined)header.delegationDepth=0;return {header,events:[...snapshot.events].sort((a,b)=>a.seq-b.seq)};}
 function validateOpeningSource(record,view,views){
   if(!record.opening)return;const source=record.opening.source,assistant=view.events.find(event=>event.type==='assistant/message'&&event.data?.message?.id===source.assistantMessageId);
   const call=view.events.find(event=>event.type==='tool/call'&&event.data?.name==='rp_begin_story'&&event.data.callId===source.callId&&event.data.turn===assistant?.data.turn&&event.data.step===assistant?.data.step);
@@ -20,8 +21,8 @@ export function createGmTransfer({ctx,store,readSession,notify}){
   function notGenerating(ids){if(ids.some(id=>ctx.agents.get(id)?.status==='running'))fail('EXPORT_CHANGED','A selected story is generating; retry its snapshot when idle',409);}
   async function available(state,ids,signal){
     const missing=requirements();if(missing.length)required(`Required owner services are missing: ${missing.join(', ')}`);
-    const views=new Map();
-    for(const id of ids){signal?.throwIfAborted();const observed=await readSession(id,signal);if(!observed)required(`Canonical destination Session is missing: ${id}`);if(observed.header?.id!==id||observed.header.agentPreset!=='rp-gm')invalid('Session identity or generic preset does not match GM metadata');views.set(id,projectSession(observed));}
+    const views=new Map(),sources=new Map();
+    for(const id of ids){signal?.throwIfAborted();const observed=await readSession(id,signal);if(!observed)required(`Canonical destination Session is missing: ${id}`);if(observed.header?.id!==id||observed.header.agentPreset!=='rp-gm')invalid('Session identity or generic preset does not match GM metadata');sources.set(id,clone(observed));views.set(id,projectSession(observed));}
     for(const record of state.payload.bindings){
       signal?.throwIfAborted();const {binding}=record,view=views.get(binding.sessionId);
       if((view.header.parentSession??undefined)!==(record.parentSessionId??undefined))invalid('GM binding ancestry does not match canonical Session header');validateOpeningSource(record,view,views);
@@ -37,7 +38,7 @@ export function createGmTransfer({ctx,store,readSession,notify}){
         const receiptId=record.opening?.receiptId;if(!receiptId||!acceptedFactPresentations(view).some(item=>item.factReceiptId===receiptId)||!narratives.records.some(item=>item.factReceiptId===receiptId))invalid('Active GM metadata lacks its accepted canonical opening');
       }
     }
-    signal?.throwIfAborted();return views;
+    signal?.throwIfAborted();return sources;
   }
   return {
     contentRevision:()=>store.contentRevision(),
@@ -45,7 +46,7 @@ export function createGmTransfer({ctx,store,readSession,notify}){
       const ids=sessionIds(input.sessionIds);notGenerating(ids);const captured=normalizeState(await store.exportSelection(ids),ids);
       if(captured.payload.bindings.some(record=>record.binding.status==='restoring'))fail('EXPORT_CHANGED','A selected story is still restoring',409);
       const before=await available(captured,ids,input.signal);notGenerating(ids);
-      for(const id of ids){const after=await readSession(id,input.signal);if(!after||sourceIdentity({header:before.get(id).header,events:before.get(id).events})!==sourceIdentity(after))fail('EXPORT_CHANGED','Canonical source changed during GM export',409);}
+      for(const id of ids){const after=await readSession(id,input.signal);if(!after||!isDeepStrictEqual(sourceIdentity(before.get(id)),sourceIdentity(after)))fail('EXPORT_CHANGED','Canonical source changed during GM export',409);}
       if((await store.contentRevision()).revision!==captured.revision)fail('EXPORT_CHANGED','GM metadata changed during export',409);return clone(captured);
     },
     async preflightRestore(input){
