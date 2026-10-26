@@ -65,7 +65,7 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
   async function generationHandler(invocation){
     const args=tokens(invocation.rawInput);if(args.length!==2)fail('DECISION_SOURCE_INVALID','Expected the stored generation operation and hash',403);const [operationId,hash]=args,sessionId=invocation.agent.session.id;let job=await findJob(sessionId,operationId);
     if(!job||job.requestHash!==hash||requestFingerprint(job.request)!==hash)fail('DECISION_SOURCE_INVALID','Stored generation request does not match the command',403);
-    const source=await anchor(invocation,GENERATE,operationId,hash),state=await provider().factReviewState({sessionId,signal:invocation.signal});let candidate=generatedCandidate(state,job);const round=generationTarget(state,job,candidate);
+    const source=await anchor(invocation,GENERATE,operationId,hash),state=await provider().factReviewState({sessionId,signal:invocation.signal});let candidate=generatedCandidate(state,job);const replaying=!!candidate,round=generationTarget(state,job,candidate);
     await saveJob(sessionId,operationId,{source});
     if(!candidate){
       if(!generator?.select||!generator?.generate)fail('FACT_GENERATOR_UNAVAILABLE','The fact generation model service is unavailable',503);
@@ -73,7 +73,7 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
       const payload=normalizeCandidate(await generator.generate({sessionId,jobId:job.id,request:freeze(clone(job.request)),round:freeze(clone(round)),model:freeze(clone(model)),signal:invocation.signal}));invocation.signal.throwIfAborted();
       const staged=await provider().stageFactCandidate({sessionId,roundId:job.roundId,payload,model,operationId,expectedRoundVersion:job.request.expectedRoundVersion,source,approvalRequired:job.request.approvalRequired,generationRequest:clone(job.request),signal:invocation.signal});invocation.signal.throwIfAborted();candidate=staged.round.candidates.find(value=>value.id===staged.candidateId);if(!candidate)fail('GENERATION_NOT_STAGED','Database did not return its staged candidate',409);
     }
-    job=await findJob(sessionId,operationId);if(job.status==='cancelled')fail('CANCELLED','The generation was cancelled',409);invocation.signal.throwIfAborted();await saveJob(sessionId,operationId,{candidateId:candidate.id,model:job.model??candidate.model});
+    job=await findJob(sessionId,operationId);if(job.status==='cancelled'&&!replaying)fail('CANCELLED','The generation was cancelled',409);invocation.signal.throwIfAborted();await saveJob(sessionId,operationId,{candidateId:candidate.id,model:job.model??candidate.model});
     return {kind:'success',text:JSON.stringify({schemaVersion:1,operationId,candidateId:candidate.id,payloadHash:candidate.payloadHash})};
   }
   if(ctx.commands?.register)disposers.push(ctx.commands.register({name:GENERATE,description:'Generate one tool-free fact candidate from its immutable captured request.',recordInput:true,input:{hint:'<operationId> <requestHash>'},handler:generationHandler}));

@@ -53,7 +53,7 @@ export function canonicalSource(exec,toolName) {
 
 /** Captures real current-turn input/evidence, never model-authored capture fields. */
 export function captureFactTurn(view,canonical,binding){
-  const rows=view.events.filter(event=>event.seq>canonical.source.turnStartSeq&&event.seq<canonical.source.callSeq),player=rows.findLast(event=>event.type==='user/message');
+  const rows=view.events.filter(event=>event.seq>canonical.source.turnStartSeq&&event.seq<canonical.source.callSeq),assistant=view.events.find(event=>event.type==='assistant/message'&&event.data?.message?.id===canonical.source.assistantMessageId),player=rows.findLast(event=>event.type==='user/message'&&event.data?.source?.kind==='user'&&event.seq<assistant?.seq);
   if(!player||typeof player.data?.id!=='string')fail('FACT_CAPTURE_UNAVAILABLE','The canonical player input is unavailable',409);
   const content=message=>(message?.content??[]).filter(block=>block.type==='text').map(block=>block.text).join('\n');
   const excluded=new Set(['rp_gm_state','rp_begin_story','rp_commit_turn','rp_propose_turn','rp_present']),names=[...new Set(rows.filter(event=>event.type==='tool/call'&&!excluded.has(event.data?.name)).map(event=>event.data.name))];
