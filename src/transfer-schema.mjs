@@ -1,4 +1,5 @@
 import {clone,entryKey,fail,normalizeCharacter,normalizePersona,normalizeProfileRef,normalizeSources,object} from './core.mjs';
+import {normalizeReview} from './review-transfer.mjs';
 const invalid=message=>fail('RESTORE_PAYLOAD_INVALID',message,400);
 const statuses=new Set(['prepared','starting','active','failed','restoring']);
 const bindingKeys=['schemaVersion','id','sessionId','launchId','title','status','character','persona','opening','examples','sources','profile','factEntryRefs','createdAt'];
@@ -31,7 +32,7 @@ function binding(value){
   if(new Set(factEntryRefs.map(entryKey)).size!==factEntryRefs.length||factEntryRefs.some(item=>!slots.has(item.sourceKey))||!['gm.scene','gm.facts'].every(id=>factEntryRefs.some(item=>item.sourceKey==='@session'&&item.entryId===id)))invalid('Registered story state refs are invalid');
   return {schemaVersion:1,id:string(value.id,'Binding ID'),sessionId:string(value.sessionId,'Session ID'),launchId:string(value.launchId,'Launch ID'),title:string(value.title,'Story title'),status:value.status,character:normalizeCharacter(value.character),persona:normalizePersona(value.persona),opening:{id:string(value.opening.id,'Opening ID'),text:string(value.opening.text,'Opening text')},examples:string(value.examples,'Examples',true),sources,profile:normalizeProfileRef(value.profile),factEntryRefs,createdAt:string(value.createdAt,'Created at')};
 }
-function record(value){keys(value,['binding','parentSessionId','lastReceiptId','opening']);return {binding:binding(value.binding),...value.parentSessionId===undefined?{}:{parentSessionId:string(value.parentSessionId,'Parent Session ID')},...value.lastReceiptId===undefined?{}:{lastReceiptId:string(value.lastReceiptId,'Fact receipt ID')},...value.opening===undefined?{}:{opening:openingPointer(value.opening)}};}
+function record(value){keys(value,['binding','parentSessionId','lastReceiptId','opening','review']);return {binding:binding(value.binding),...value.parentSessionId===undefined?{}:{parentSessionId:string(value.parentSessionId,'Parent Session ID')},...value.lastReceiptId===undefined?{}:{lastReceiptId:string(value.lastReceiptId,'Fact receipt ID')},...value.opening===undefined?{}:{opening:openingPointer(value.opening)},...value.review===undefined?{}:{review:normalizeReview(value.review,value.binding.sessionId)}};}
 function launch(value){
   keys(value,['launchId','fingerprint','id','sessionId','promptRequestId','createdAt','progress','error']);if(typeof value.fingerprint!=='string'||!/^[a-f0-9]{64}$/u.test(value.fingerprint))invalid('Invalid launch fingerprint');keys(value.progress,['created','sources','initialized','profile','prompt']);if(Object.values(value.progress).some(item=>typeof item!=='boolean'))invalid('Invalid launch progress');
   let error;if(value.error!==undefined){keys(value.error,['code','message']);error={code:string(value.error.code,'Error code'),message:string(value.error.message,'Error message',true)};}

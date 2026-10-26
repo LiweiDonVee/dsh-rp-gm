@@ -6,9 +6,11 @@ import {createGmRuntime} from './runtime.mjs';import {registerGmAgent} from './a
 import {createGmRoutes} from './routes.mjs';
 import {createStoryBranches} from './branches.mjs';
 import {createGmTransfer} from './transfer.mjs';
+import {createFactReview} from './review.mjs';
+import {createFactGenerator} from './fact-model.mjs';
 
 export const name='rp-gm';
-export const inject=['connection','typertGateway','agents','tools','systemPrompt','agentPresets'];
+export const inject=['connection','typertGateway','agents','tools','systemPrompt','agentPresets','commands','sessionQuery','llm'];
 export const PRESET_ID='rp-gm';
 
 export async function createGmHost(ctx,options={}) {
@@ -20,9 +22,10 @@ export async function createGmHost(ctx,options={}) {
   const lastStep=()=>{const value=ctx.get('rpLastStep');if(typeof value?.ensureBuiltinProfile!=='function'||typeof value.bindSession!=='function')fail('LAST_STEP_UNAVAILABLE','Install RP LastStep 0.3 with builtin and factual presentation support',503);return value;};
   async function viewFor(id,agent,signal){if(agent){if(agent.session.id!==id||ctx.agents.get(id)!==agent)fail('AGENT_MISMATCH','Caller does not own this story',403);return {header:agent.session.header??{id},events:agent.session.snapshotEvents()};}return readSession(id,signal);}
   async function bound(id,agent,signal){const view=await viewFor(id,agent,signal);if(!view)return null;let record=await store.binding(id);if(!record&&view.header?.agentPreset===PRESET_ID&&view.header?.parentSession){const parent=await bound(view.header.parentSession,undefined,signal);if(parent)record=await store.inherit(view.header.parentSession,id);}return record;}
-  const runtime=createGmRuntime({ctx,store,database,bound,viewFor,notify});
+  let review;const runtime=createGmRuntime({ctx,store,database,bound,viewFor,notify,reviewState:input=>review.reviewState(input),factOperationLive:id=>review?.isLive(id)});
+  const generator=createFactGenerator(ctx);disposers.push(()=>generator.close());review=createFactReview({ctx,store,runtime,database,bound,viewFor,notify,generator});disposers.push(()=>review.close());
   const branches=createStoryBranches({ctx,store,runtime,database,readSession,notify});
-  const transfer=createGmTransfer({ctx,store,readSession,notify});
+  const transfer=createGmTransfer({ctx,store,readSession,notify,factOperationLive:id=>review.isLive(id)});
   const result=record=>({binding:freeze(clone(record.binding)),sessionId:record.binding.sessionId,status:record.binding.status});
   async function start(request,signal){
     let journal=await store.reserve(request),record=await store.binding(journal.sessionId);
@@ -33,7 +36,7 @@ export async function createGmHost(ctx,options={}) {
       for(const source of request.sources){const resolved=await db.database({databaseId:source.databaseId,version:source.version,signal});if(resolved.database?.id!==source.databaseId||resolved.database.version!==source.version)fail('SOURCE_UNAVAILABLE','Pinned source version is unavailable',409);}
       const profile=record?.binding.profile??request.profile??await last.ensureBuiltinProfile({key:BUILTIN_PROFILE_KEY,profile:clone(BUILTIN_PROFILE)});
       const resolved=await last.profile(profile,signal);if(resolved.profile?.status!=='ready'||resolved.profile.id!==profile.profileId||resolved.profile.version!==profile.version)fail('PROFILE_NOT_READY','Choose an explicitly ready profile version',409);
-      if(!record)record=await store.prepare(request.launchId,createBinding(request,{...journal,profile}));
+      if(!record)record=await store.prepare(request.launchId,createBinding(request,{...journal,profile}),options.factApprovalDefault===true);
       let snapshot=await readSession(journal.sessionId,signal);
       if(snapshot&&snapshot.header.agentPreset!==PRESET_ID)fail('SESSION_CONFLICT','Reserved session belongs to another preset',409);
       if(!snapshot){const created=await ctx.typertGateway.invoke({namespace:'session',method:'create',args:{request:{sessionId:journal.sessionId,agentPreset:PRESET_ID}},peer:ctx.connection.browserPeer,signal});if(created.sessionId!==journal.sessionId)fail('SESSION_CONFLICT','Host did not retain the reserved session identity',409);}
@@ -50,7 +53,15 @@ export async function createGmHost(ctx,options={}) {
       await store.checkpoint(request.launchId,'prompt');notify(journal.sessionId);return result(await store.binding(journal.sessionId));
     }catch(error){if(record)await store.setStatus(journal.sessionId,'failed');await store.diagnostic(request.launchId,error);notify(journal.sessionId);throw error;}
   }
-  const service={apiVersion:1,
+  const service={apiVersion:1,capabilities:{factReview:1,factRegeneration:1},
+    reviewState:input=>run(input.signal,signal=>review.reviewState({...input,signal})),
+    configureReview:input=>run(input.signal,signal=>review.configureReview({...input,signal})),
+    decideFacts:input=>run(input.signal,signal=>review.decideFacts({...input,signal})),
+    resumeFactDecision:input=>run(input.signal,signal=>review.resumeFactDecision({...input,signal})),
+    resumeFactPresentation:input=>run(input.signal,signal=>review.resumeFactPresentation({...input,signal})),
+    regenerateFacts:input=>run(input.signal,signal=>review.regenerateFacts({...input,signal})),
+    resumeFactGeneration:input=>run(input.signal,signal=>review.resumeFactGeneration({...input,signal})),
+    cancelFactGeneration:input=>run(input.signal,signal=>review.cancelFactGeneration({...input,signal})),
     startStory:input=>run(input.signal,async signal=>{const request=normalizeStart(input),fingerprint=requestFingerprint(request),pending=tasks.get(request.launchId);if(pending){if(pending.fingerprint!==fingerprint)fail('LAUNCH_CONFLICT','This launch is already starting with different data',409);return pending.promise;}const promise=start(request,signal);tasks.set(request.launchId,{fingerprint,promise});try{return await promise;}finally{tasks.delete(request.launchId);}}),
     binding:input=>run(input.signal,async signal=>{const record=await runtime.refresh(input.sessionId,undefined,signal);return record?freeze(clone(record.binding)):null;}),
     storyState:input=>run(input.signal,signal=>runtime.storyState({...input,signal})),
@@ -64,12 +75,12 @@ export async function createGmHost(ctx,options={}) {
     restoreState:input=>run(input.signal,signal=>transfer.restoreState({...input,signal})),
     contentRevision:(input={})=>run(input.signal,()=>transfer.contentRevision()),
     listStories:({signal}={})=>run(signal,async()=>({stories:(await store.bindings()).map(({binding})=>({sessionId:binding.sessionId,title:binding.title,status:binding.status,character:binding.character,persona:binding.persona}))})),
-    diagnostics:()=>run(undefined,async()=>({database:ctx.get('rpDatabase')?.apiVersion===2,lastStep:typeof ctx.get('rpLastStep')?.ensureBuiltinProfile==='function',context:!!ctx.get('rpContext'),loop:!!ctx.get('loopStudio')})),
+    diagnostics:()=>run(undefined,async()=>({database:ctx.get('rpDatabase')?.apiVersion===2,lastStep:typeof ctx.get('rpLastStep')?.ensureBuiltinProfile==='function',context:!!ctx.get('rpContext'),loop:!!ctx.get('loopStudio'),lastStepProseRegeneration:ctx.get('rpLastStep')?.capabilities?.narrativeRevisions===1&&typeof ctx.get('rpLastStep').storyHistory==='function'&&typeof ctx.get('rpLastStep').regenerateProse==='function'})),
     subscribe(id,fn){const set=subscribers.get(id)??new Set();set.add(fn);subscribers.set(id,set);return()=>{set.delete(fn);if(!set.size)subscribers.delete(id);};},
     async close(){if(stopped)return;stopped=true;for(const life of operations.keys())life.abort();await Promise.allSettled(operations.values());for(const dispose of disposers.splice(0).reverse())await dispose();subscribers.clear();},
   };
   disposers.push(await ctx.agentPresets.register({id:PRESET_ID,name:'通用故事 GM',description:'所有故事共用的原生 GM',plugins:[{id:'persona',name:'@deepseek-ai/dsh-persona',config:{prefix:GM_PROTOCOL}}]}));
-  adapter=await registerGmAgent(ctx,runtime,async agent=>{try{const state=await runtime.storyState({sessionId:agent.session.id,agent});return `CURRENT_GM_STORY (read rp_gm_state for the full current revision)\n${JSON.stringify({title:state.binding.title,status:state.binding.status,character:state.binding.character,persona:state.binding.persona,scene:state.scene,facts:state.facts.items.slice(0,12).map(item=>({id:item.id,text:item.text.slice(0,500)})),factCount:state.facts.items.length,lastFactReceiptId:state.lastFactReceipt?.id}).slice(0,10000)}`;}catch(error){return `GM state unavailable (${error.code??'UNAVAILABLE'}). Do not invent facts; use rp_gm_state after the dependency is restored.`;}});
+  adapter=await registerGmAgent(ctx,runtime,async agent=>{try{const state=await runtime.storyState({sessionId:agent.session.id,agent});return `CURRENT_GM_STORY (Database selected facts below are authoritative; older native commits/prose are audit. Read rp_gm_state for the full current revision.)\n${JSON.stringify({title:state.binding.title,status:state.binding.status,character:state.binding.character,persona:state.binding.persona,scene:state.scene,facts:state.facts.items.slice(0,12).map(item=>({id:item.id,text:item.text.slice(0,500)})),factCount:state.facts.items.length,lastFactReceiptId:state.lastFactReceipt?.id,factRoundId:state.lastFactReceipt?.factRoundId,factRevision:state.lastFactReceipt?.factRevision,review:state.review?{enabled:state.review.enabled,pendingCandidateId:state.review.latestRound?.pendingCandidateId,pendingDecision:state.review.pendingDecision?.status}:undefined}).slice(0,10000)}`;}catch(error){return `GM state unavailable (${error.code??'UNAVAILABLE'}). Do not invent facts; use rp_gm_state after the dependency is restored.`;}});
   disposers.push(adapter);
   disposers.push(ctx.on('session/event',(session,event)=>{if(!stopped&&['tool/result','assistant/message','turn/end','user/message'].includes(event.type))void run(undefined,signal=>runtime.refresh(session.id,ctx.agents.get(session.id),signal)).catch(()=>{});}));
   return service;
