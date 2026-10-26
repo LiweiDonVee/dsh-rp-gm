@@ -32,10 +32,10 @@ export function createGmRuntime({ctx,store,database,bound,viewFor,notify,reviewS
   async function storyState(input){
     const record=await refresh(input.sessionId,input.agent,input.signal);if(!record)fail('STORY_NOT_FOUND','Story binding is unavailable',404);
     const agent=input.agent??ctx.agents.get(input.sessionId);
-    const fork=typeof ctx.get('rpLastStep')?.inheritSession==='function'&&!await reserved(input.sessionId);
+    const gated=await reserved(input.sessionId),fork=typeof ctx.get('rpLastStep')?.inheritSession==='function'&&!gated;
     if(!agent){const snapshot=await database().effectiveV2({sessionId:input.sessionId,signal:input.signal});return {binding:freeze(clone(record.binding)),...readState({...snapshot,entries:snapshot.entries.filter(entry=>entry.mode!=='disabled')}),capabilities:{rollback:false,fork,autoplay:false}};}
     const current=await scope({...input,agent}),snapshot=await current.access.snapshot(),receipt=await latest(current);
-    const review=database().capabilities?.factReview===1?await reviewState?.({sessionId:input.sessionId,signal:input.signal}):undefined;
+    const review=!gated&&database().capabilities?.factReview===1?await reviewState?.({sessionId:input.sessionId,signal:input.signal}):undefined;
     return {binding:freeze(clone(record.binding)),...readState(snapshot),...receipt?{lastFactReceipt:freeze(clone(receipt))}:{},...review?{review}:{},capabilities:{rollback:fork&&receipt?.kind==='turn'&&receipt.source.turnStartSeq>0,fork,autoplay:false,...review?{factReview:true,factRegeneration:true}:{}}};
   }
   return {
