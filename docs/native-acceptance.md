@@ -1,5 +1,13 @@
 # Verification evidence
 
+## Current 0.2.0 source checkpoint — 2026-10-27
+
+Product source `20d3ab1fe9e1bbec6f0cdbba0acbf684bd147d22` has passed scoped spec/quality review, including the restoring storyState read correction. The frozen 0.2.0 archive SHA256 is `b4738a787e6f30ce2e00c81e11307a0e5c65071bbb2799acb1b51ff66de4b38a`; it precedes this documentation-only update. Recorded component checks are 138 host +16 UI, lint/build/package passing. These counts are not a native integration result.
+
+The new fact-approval and two-layer regeneration native acceptance remains incomplete. Neither source review, SDK44 mechanics nor the legacy/default-OFF regression establishes those new workflows. Final tested manifest/archive identities and actual command/model counters must be recorded when that gate completes. Usage is described in [fact review](fact-review.md).
+
+## Historical native evidence
+
 Official installed DSH is `0.2.1-rc.3`. The local host reference checkout is rc.2 and is not runtime proof. Verification uses independent homes with native tools and real installed archives; only model output and an explicit first-result-loss fault are deterministic test infrastructure. No paid model was called.
 
 | Input | Version | Accepted SHA256 |
