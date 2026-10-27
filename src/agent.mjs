@@ -1,5 +1,5 @@
 import {fail,object} from './core.mjs';
-export const TOOL_NAMES=Object.freeze(['rp_gm_state','rp_begin_story','rp_commit_turn']);
+export const TOOL_NAMES=Object.freeze(['rp_gm_state','rp_begin_story','rp_commit_turn','rp_propose_turn']);
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
 const output={schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
 
@@ -14,6 +14,7 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
     {name:'rp_gm_state',description:'Read the current scene, facts, Database revision and active receipt. binding.sources/profile are initial launch provenance; Database owns current sources and LastStep owns current writing style.',parameters:schema({}),method:'toolState'},
     {name:'rp_begin_story',description:'Commit the owner-selected opening once. The seed and exact text come from the story binding, never tool arguments.',parameters:schema({}),method:'begin'},
     {name:'rp_commit_turn',description:'Atomically commit this turn once, respecting human policies. Reuse its receipt if presentation fails.',parameters:schema({expectedRevision:{type:'integer',minimum:0},scene:{type:'object'},facts:{type:'object'},operations:{type:'array',items:{type:'object'}},summary:{type:'string'},packet:{type:'object'}},['expectedRevision','summary','packet']),method:'commit'},
+    {name:'rp_propose_turn',description:'Persist this complete candidate for human review and end the turn. Call alone and directly; this does not change authoritative facts or run presentation.',parameters:schema({expectedRevision:{type:'integer',minimum:0},scene:{type:'object'},facts:{type:'object'},operations:{type:'array',items:{type:'object'}},summary:{type:'string'},packet:{type:'object'}},['expectedRevision','summary','packet']),method:'propose'},
   ];
   async function attach(agent,retrySetup=false){
     if(stopped)return;const existing=scopes.get(agent);if(existing){if(retrySetup)await runtime.ensure(agent,existing.life.signal);return;}
@@ -22,7 +23,7 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
     if(bound&&ctx.tools.get('run_code',agent)===undefined){
       for(const definition of definitions)record.tools.push(agent.ctx.tools.register({...definition,output,finalizeContent,execute:async(args,exec)=>{
         try{if(!object(args)||Object.keys(args).some(key=>!Object.hasOwn(definition.parameters.properties,key)))fail('INVALID_TOOL_ARGUMENTS','Unexpected GM tool arguments');
-          exec.signal.throwIfAborted();return await (definition.method==='commit'?runtime.commit(args,exec):runtime[definition.method](exec));
+          exec.signal.throwIfAborted();return await (['commit','propose'].includes(definition.method)?runtime[definition.method](args,exec):runtime[definition.method](exec));
         }catch(error){if(['GmError','DatabaseError','PresetError'].includes(error?.name)&&typeof error.code==='string'&&typeof error.message==='string')errors.set(exec,{code:error.code,message:error.message,...typeof error.receiptId==='string'?{receiptId:error.receiptId}:{}});throw error;}
       }}));
     }else{const inherited=TOOL_NAMES.filter(name=>ctx.tools.get(name,agent)!==undefined);if(inherited.length)record.restriction=agent.ctx.tools.restrict({deny:inherited});}

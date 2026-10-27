@@ -1,5 +1,19 @@
 # Verification evidence
 
+## Current 0.2.0 native combination evidence — 2026-10-27
+
+All **5/5 actual fact-approval/regeneration functional groups passed** with the V6 seven installed packages on official DSH 0.2.1-rc.3 in isolated homes. Both public interruption windows were hit; original-operation settlement resume/replay made zero requests at every model stage, followed by explicit writing. Current facts, frozen prose regeneration, child-owned operations and opaque different-home cold recovery passed. The legacy nine-scenario regression/defaults readback and Story Kit's 13 existing phases remain separately attributed runs.
+
+The V6 manifest SHA256 is `79aa41cb6b3602b3fa2a02cf27cdd6b0bd3b72f34c7ba6a2b078a620b765aeeb`; the tested GM archive is `b4738a787e6f30ce2e00c81e11307a0e5c65071bbb2799acb1b51ff66de4b38a`. See [Studio's current evidence](https://github.com/LiweiDonVee/dsh-rp-studio/blob/main/docs/native-acceptance.md#v6-approval-and-regeneration) for source/raw identities, actual counters and limits. The five-group raw runner retains `checkpoint-passed` / `finalAcceptance:false`; release archives and final CI are separate gates. Check downloads against the matching release's SHA256SUMS.
+
+## 0.2.0 source checkpoint before V6 — 2026-10-27
+
+Product source `20d3ab1fe9e1bbec6f0cdbba0acbf684bd147d22` has passed scoped spec/quality review, including the restoring storyState read correction. The frozen 0.2.0 archive SHA256 is `b4738a787e6f30ce2e00c81e11307a0e5c65071bbb2799acb1b51ff66de4b38a`; it precedes this documentation-only update. Recorded component checks are 138 host +16 UI, lint/build/package passing. These counts are not a native integration result.
+
+Source review, SDK44 mechanics and component fixtures remain separate evidence from the later V6 native run above. Usage is described in [fact review](fact-review.md); older native records below retain their original tested identities and scope.
+
+## Historical native evidence
+
 Official installed DSH is `0.2.1-rc.3`. The local host reference checkout is rc.2 and is not runtime proof. Verification uses independent homes with native tools and real installed archives; only model output and an explicit first-result-loss fault are deterministic test infrastructure. No paid model was called.
 
 | Input | Version | Accepted SHA256 |

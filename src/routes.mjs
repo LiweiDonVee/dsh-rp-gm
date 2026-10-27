@@ -1,5 +1,7 @@
 import {GmError,object} from './core.mjs';import {SAMPLE,sampleStory} from './samples.mjs';
+import {normalizeDecision} from './review-schema.mjs';
 const fields={library:[],startSample:['launchId','openingId'],startStory:['launchId','title','character','persona','opening','examples','sources','profile','initialScene','initialFacts'],state:['sessionId'],binding:['sessionId']};
+Object.assign(fields,{reviewState:['sessionId'],configureReview:['sessionId','enabled','expectedRevision'],decideFacts:['decision'],resumeFactDecision:['sessionId','operationId'],regenerateFacts:['sessionId','roundId','operationId','expectedRoundVersion','instruction'],resumeFactGeneration:['sessionId','operationId'],cancelFactGeneration:['sessionId','jobId'],resumeFactPresentation:['sessionId','roundId','operationId']});
 const id=value=>typeof value==='string'&&value.trim().length>0&&value.length<=256;
 const failure=(status,code,message,receiptId)=>Response.json({error:{code,message,...typeof receiptId==='string'?{receiptId}:{}}},{status,headers:{'cache-control':'no-store'}});
 function errorResponse(error){if(error instanceof GmError||error?.name==='DatabaseError'||error?.name==='PresetError')return failure(error.status??400,error.code,error.message,error.receiptId);if(error?.name==='AbortError')return failure(499,'CANCELLED','The operation was cancelled');return failure(503,'UNAVAILABLE','Story service is temporarily unavailable');}
@@ -11,11 +13,12 @@ export function createGmRoutes(service){
       if(stopped)return failure(503,'UNAVAILABLE','GM plugin is unloaded');
       let input;try{input=await request.json();}catch{return failure(400,'INVALID_REQUEST','A JSON operation is required');}
       if(!object(input)||!Object.hasOwn(fields,input.action)||Object.keys(input).some(key=>key!=='action'&&!fields[input.action].includes(key)))return failure(400,'INVALID_REQUEST','Unexpected story operation fields');
-      if(['state','binding'].includes(input.action)&&!id(input.sessionId)||input.action==='startSample'&&(!id(input.launchId)||!id(input.openingId)))return failure(400,'INVALID_REQUEST','A valid story identity is required');
+      if(fields[input.action].includes('sessionId')&&!id(input.sessionId)||input.action==='startSample'&&(!id(input.launchId)||!id(input.openingId)))return failure(400,'INVALID_REQUEST','A valid story identity is required');
       try{
         request.signal.throwIfAborted();const {action,...args}=input;let result;
         if(action==='library')result={apiVersion:1,...await service.listStories({signal:request.signal}),dependencies:await service.diagnostics(),sample:SAMPLE};
         else if(action==='startSample')result=await service.startStory({...sampleStory(args),signal:request.signal});
+        else if(action==='decideFacts')result=await service.decideFacts({...normalizeDecision(args.decision),signal:request.signal});
         else result=await service[action==='state'?'storyState':action]({...args,signal:request.signal});
         return Response.json(result,{headers:{'cache-control':'no-store'}});
       }catch(error){return errorResponse(error);}

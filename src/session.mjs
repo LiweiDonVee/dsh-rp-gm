@@ -16,7 +16,7 @@ export function projectSession(snapshot) {
   return {header:snapshot.header,sessionId:snapshot.header?.id,events,visible:nodes.map(seq=>bySeq.get(seq)),activeEvents:events.filter(event=>activeSeqs.has(event.seq)),activeSeqs,activeAssistantIds};
 }
 
-export function canonicalToolResults(view,names) {
+export function canonicalToolResults(view,names,{includeErrors=false}={}) {
   const bySeq=new Map(view.events.map(event=>[event.seq,event]));
   function sourceCall(event,seen=new Set()) {
     if(!event||seen.has(event.seq))return null;seen.add(event.seq);
@@ -25,7 +25,7 @@ export function canonicalToolResults(view,names) {
   }
   const results=[];
   for(const result of view.activeEvents){
-    const message=result.data?.message;if(result.type!=='tool/result'||message?.isError||message?.source?.kind!=='tool'||message.toolCallId!==message.source.callId)continue;
+    const message=result.data?.message;if(result.type!=='tool/result'||!includeErrors&&message?.isError||message?.source?.kind!=='tool'||message.toolCallId!==message.source.callId)continue;
     const call=sourceCall(result);if(!call||!names.includes(call.data?.name)||call.data.callId!==message.toolCallId||call.data.turn!==result.data.turn||call.data.step!==result.data.step)continue;
     const assistant=view.events.findLast(event=>event.seq<call.seq&&event.type==='assistant/message'&&event.data?.turn===call.data.turn&&event.data?.step===call.data.step&&event.data.message?.content?.some(block=>block.type==='tool-call'&&block.id===call.data.callId&&block.name===call.data.name));
     if(!assistant||!view.activeAssistantIds.includes(assistant.data.message.id))continue;
@@ -49,6 +49,16 @@ export function canonicalSource(exec,toolName) {
   const start=view.events.findLast(event=>event.seq<assistant.seq&&event.type==='turn/start');
   if(!start||start.data?.turn!==call.data.turn||view.events.some(event=>event.type==='turn/end'&&event.seq>start.seq&&event.seq<call.seq))fail('INVALID_SOURCE','Tool call is outside its canonical turn',403);
   return {turnKey:JSON.stringify([session.id,start.seq]),source:{assistantMessageId:assistant.data.message.id,callId:exec.callId,callSeq:call.seq,turnStartSeq:start.seq}};
+}
+
+/** Captures real current-turn input/evidence, never model-authored capture fields. */
+export function captureFactTurn(view,canonical,binding){
+  const rows=view.events.filter(event=>event.seq>canonical.source.turnStartSeq&&event.seq<canonical.source.callSeq),assistant=view.events.find(event=>event.type==='assistant/message'&&event.data?.message?.id===canonical.source.assistantMessageId),player=rows.findLast(event=>event.type==='user/message'&&event.data?.source?.kind==='user'&&event.seq<assistant?.seq);
+  if(!player||typeof player.data?.id!=='string')fail('FACT_CAPTURE_UNAVAILABLE','The canonical player input is unavailable',409);
+  const content=message=>(message?.content??[]).filter(block=>block.type==='text').map(block=>block.text).join('\n');
+  const excluded=new Set(['rp_gm_state','rp_begin_story','rp_commit_turn','rp_propose_turn','rp_present']),names=[...new Set(rows.filter(event=>event.type==='tool/call'&&!excluded.has(event.data?.name)).map(event=>event.data.name))];
+  const observations=canonicalToolResults(view,names,{includeErrors:true}).filter(({result,call})=>call.seq>canonical.source.turnStartSeq&&result.seq<canonical.source.callSeq).map(({result,call})=>({callSeq:call.seq,resultSeq:result.seq,toolName:call.data.name,text:content(result.data.message)}));
+  return {playerInput:{seq:player.seq,messageId:player.data.id,text:content(player.data)},story:{title:binding.title,character:structuredClone(binding.character),persona:structuredClone(binding.persona),examples:binding.examples},observations};
 }
 
 /** Authenticated owner snapshot, including paged canonical history. Never appends. */

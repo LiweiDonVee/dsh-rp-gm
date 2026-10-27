@@ -3,6 +3,7 @@ import {clone,entryKey,fail,readState,requestFingerprint} from './core.mjs';
 import {acceptedFactPresentations,projectSession} from './session.mjs';
 import {envelope,normalizeState,sessionIds} from './transfer-schema.mjs';
 import {validateInitialSources} from './sources.mjs';
+import {needsReviewOwners,verifyReviewSources} from './review-transfer.mjs';
 
 const required=message=>fail('RESTORE_REQUIREMENT_MISSING',message,409);
 const invalid=message=>fail('RESTORE_PAYLOAD_INVALID',message,400);
@@ -17,16 +18,17 @@ function validateOpeningSource(record,view,views){
   while(cursor!==origin&&!seen.has(cursor)){seen.add(cursor);cursor=views.get(cursor)?.header.parentSession;}
   if(cursor!==origin)invalid('Opening source does not belong to this Session ancestry');
 }
-export function createGmTransfer({ctx,store,readSession,notify}){
-  function requirements(){const missing=[];const db=ctx.get('rpDatabase'),last=ctx.get('rpLastStep');if(db?.apiVersion!==2||typeof db.effectiveV2!=='function')missing.push('rpDatabase.apiVersion=2');if(!last||['profile','state','narratives'].some(key=>typeof last[key]!=='function'))missing.push('rpLastStep');return missing;}
-  function notGenerating(ids){if(ids.some(id=>ctx.agents.get(id)?.status==='running'))fail('EXPORT_CHANGED','A selected story is generating; retry its snapshot when idle',409);}
+export function createGmTransfer({ctx,store,readSession,notify,factOperationLive}){
+  function requirements(state){const missing=[];const db=ctx.get('rpDatabase'),last=ctx.get('rpLastStep');if(db?.apiVersion!==2||typeof db.effectiveV2!=='function')missing.push('rpDatabase.apiVersion=2');if(!last||['profile','state','narratives'].some(key=>typeof last[key]!=='function'))missing.push('rpLastStep');if(state&&needsReviewOwners(state)){if(db?.capabilities?.factReview!==1||typeof db.factReviewState!=='function')missing.push('rpDatabase.capabilities.factReview=1');if(last?.capabilities?.narrativeRevisions!==1||typeof last.presentFact!=='function')missing.push('rpLastStep.capabilities.narrativeRevisions=1');}return missing;}
+  function notGenerating(ids){if(ids.some(id=>ctx.agents.get(id)?.status==='running'||factOperationLive?.(id)))fail('EXPORT_CHANGED','A selected story is generating; retry its snapshot when idle',409);}
   async function available(state,ids,signal){
-    const missing=requirements();if(missing.length)required(`Required owner services are missing: ${missing.join(', ')}`);
+    const missing=requirements(state);if(missing.length)required(`Required owner services are missing: ${missing.join(', ')}`);
     const views=new Map(),sources=new Map();
     for(const id of ids){signal?.throwIfAborted();const observed=await readSession(id,signal);if(!observed)required(`Canonical destination Session is missing: ${id}`);if(observed.header?.id!==id||observed.header.agentPreset!=='rp-gm')invalid('Session identity or generic preset does not match GM metadata');sources.set(id,clone(observed));views.set(id,projectSession(observed));}
     for(const record of state.payload.bindings){
       signal?.throwIfAborted();const {binding}=record,view=views.get(binding.sessionId);
       if((view.header.parentSession??undefined)!==(record.parentSessionId??undefined))invalid('GM binding ancestry does not match canonical Session header');validateOpeningSource(record,view,views);
+      await verifyReviewSources(record,view,ctx.get('rpDatabase'),signal);
       let database,profile,presentation;try{database=await ctx.get('rpDatabase').effectiveV2({sessionId:binding.sessionId,signal});profile=await ctx.get('rpLastStep').profile(binding.profile,signal);presentation=await ctx.get('rpLastStep').state(binding.sessionId,signal);}catch(error){if(['NOT_BOUND','NOT_FOUND','SESSION_NOT_FOUND','PROFILE_NOT_FOUND','BINDING_NOT_FOUND'].includes(error.code))required('Required Database or presentation state has not been restored');throw error;}
       if(database.binding?.schemaVersion!==2||!sameRefs(database.binding.factEntryRefs??[],binding.factEntryRefs))invalid('Database fact binding does not match GM registered references');
       await validateInitialSources(ctx.get('rpDatabase'),binding.sources,signal);
@@ -36,6 +38,7 @@ export function createGmTransfer({ctx,store,readSession,notify}){
       let style;try{style=await ctx.get('rpLastStep').profile({profileId:current.profileId,version:current.version},signal);}catch(error){if(error.code==='PROFILE_NOT_FOUND')required('Current LastStep style has not been restored');throw error;}
       if(style.profile?.status!=='ready'||style.profile.id!==current.profileId||style.profile.version!==current.version)required('Current LastStep style is not ready');
       const narratives=await ctx.get('rpLastStep').narratives({sessionId:binding.sessionId,signal});
+      for(const item of [...record.review?.decisions??[],...record.review?.presentations??[]])if(item.result?.presentation.status==='complete'&&!narratives.records.some(value=>value.factReceiptId===item.result.factReceiptId&&value.ref?.presentationId===item.result.presentation.presentationId))invalid('Completed GM writing metadata lacks its accepted canonical LastStep record');
       if(binding.status==='active'){
         const receiptId=record.opening?.receiptId;if(!receiptId||!acceptedFactPresentations(view).some(item=>item.factReceiptId===receiptId)||!narratives.records.some(item=>item.factReceiptId===receiptId))invalid('Active GM metadata lacks its accepted canonical opening');
       }
@@ -52,7 +55,7 @@ export function createGmTransfer({ctx,store,readSession,notify}){
       if((await store.contentRevision()).revision!==captured.revision)fail('EXPORT_CHANGED','GM metadata changed during export',409);return clone(captured);
     },
     async preflightRestore(input){
-      try{const minimal=envelope(input);normalizeState(minimal.state,minimal.sessionIds);const conflicts=await store.previewTransfer({sessionIds:minimal.sessionIds,state:minimal.state}),missing=requirements();return {supported:!conflicts.length&&!missing.length,conflicts,requirements:missing};}
+      try{const minimal=envelope(input);normalizeState(minimal.state,minimal.sessionIds);const conflicts=await store.previewTransfer({sessionIds:minimal.sessionIds,state:minimal.state}),missing=requirements(minimal.state);return {supported:!conflicts.length&&!missing.length,conflicts,requirements:missing};}
       catch(error){if(error.code==='RESTORE_REQUIREMENT_MISSING')return {supported:false,conflicts:[],requirements:[error.requirement??error.message]};if(error.code==='RESTORE_PAYLOAD_INVALID')return {supported:false,conflicts:[{code:error.code,id:'gm'}],requirements:[]};throw error;}
     },
     async restoreState(input){const minimal=envelope(input,true),result=await store.restoreTransfer(minimal,normalized=>available(normalized,minimal.sessionIds,input.signal),input.signal);for(const id of result.restoredSessionIds)notify(id);return result;},
