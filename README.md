@@ -2,11 +2,11 @@
 
 一个供所有故事共用的原生 GM 插件。选择已审阅的角色、玩家身份与开场后，主 Agent 决定并提交事实，Database 保存状态，LastStep 呈现正文；Context 可选参与选材。无需为每张卡编写 runtime。
 
-**0.2.0** 增加默认关闭、每故事独立的事实审批，以及事实／正文两个重新生成入口。候选、真实 owner 决策与写作各有独立恢复步骤。原有开局、分支／回退和恢复执行门保留。[审批与重生说明](docs/fact-review.md) 记录新流程；[既有原生验收证据](docs/native-acceptance.md) 的受测范围仍以其中明确版本为准。
+**0.2.0** 增加默认关闭、每故事独立的事实审批，以及事实／正文两个重新生成入口。候选、真实 owner 决策与写作各有独立恢复步骤。原有开局、分支／回退和恢复执行门保留。[审批与重生说明](docs/fact-review.md) 记录新流程；[原生验收证据](docs/native-acceptance.md) 列出 V6 五组功能断言通过的受测包、计数与边界。
 
 ## 安装与依赖
 
-当前待发布组合（2026-10-27）使用下列版本的本地构建 tgz。公开安装包以各仓库 Releases 页面实际列出的版本为准；未列出的新版本尚未发布，不使用旧包替代新能力。
+当前组合使用下列版本的独立安装包，下载入口位于各仓库 Releases 页面。安装前核对版本及同一 Release 的 SHA256SUMS。
 
 | 组件 | 要求 |
 |---|---|
@@ -131,6 +131,6 @@ pnpm check
 pnpm package
 ```
 
-package 生成 `artifacts/dsh-rp-gm-0.2.0.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.2.0.tgz`。新流程需要上述具备 review/revision 能力的依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门、审批／生成恢复和原生面板。保留的 [native runner](scripts/native/README.md) 记录既有验收；本次新增流程仍需实际 reviewed 产品包的组合验收。
+package 生成 `artifacts/dsh-rp-gm-0.2.0.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.2.0.tgz`。新流程需要上述具备 review/revision 能力的依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门、审批／生成恢复和原生面板。保留的 [native runner](scripts/native/README.md) 记录既有验收；V6 实际产品包的审批／两层重生五组功能断言全部通过，来源和发行验证边界见[当前原生证据](docs/native-acceptance.md)。
 
 MIT License。

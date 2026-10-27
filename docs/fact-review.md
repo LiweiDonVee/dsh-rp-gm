@@ -24,4 +24,4 @@ owner 请求的调用方在发起操作前生成 `operationId`，重试时复用
 
 分支继承设置与 Database 的实际前缀事实。父 generation/request/hash 不重绑为子任务；子分支审核候选时生成新的子 operation。继承的已生效、未呈现事实可在子分支单独呈现，使用子分支自己的 LastStep operation，不再次 finalize 父决定。SavedStory 传输只由各 owner 校验自己的数据；旧 payload 仍以关闭设置读取，新功能数据要求对应能力。
 
-本仓库聚焦测试使用明确的 Database、LastStep 和宿主合同 fixtures；它们不构成真实产品组合的原生验收。发布前仍须使用审查后的实际产品包在新的 rc.3 home 中验证命令、done、原生工具终止与模型计数。
+本仓库聚焦测试使用明确的 Database、LastStep 和宿主合同 fixtures，组件结果单独记录。后续 V6 实际产品包已在官方 rc.3 隔离 home 完成审批／两层重生五组功能断言，包含真实命令、done、原生工具终止、两个实际中断窗口及全部模型计数。受测身份、冷恢复、跨 home 与发行验证边界见[当前原生证据](native-acceptance.md)。
