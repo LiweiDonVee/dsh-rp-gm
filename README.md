@@ -2,6 +2,8 @@
 
 一个供所有故事共用的原生 GM 插件。选择已审阅的角色、玩家身份与开场后，主 Agent 决定并提交事实，Database 保存状态，LastStep 呈现正文；Context 可选参与选材。无需为每张卡编写 runtime。
 
+**0.2.1 界面更新：** 安装 RP Studio 1.5.0 后，从 **RP ▾ → 故事 GM** 打开完整原生页面；会话顶部与空白页的重复入口自动收纳。未安装或卸载 Studio 时恢复独立入口，右侧原生页签始终保留。管理界面的字体和字号随宿主设置变化。
+
 **0.2.0** 增加默认关闭、每故事独立的事实审批，以及事实／正文两个重新生成入口。候选、真实 owner 决策与写作各有独立恢复步骤。原有开局、分支／回退和恢复执行门保留。[审批与重生说明](docs/fact-review.md) 记录新流程；[原生验收证据](docs/native-acceptance.md) 列出 V6 五组功能断言通过的受测包、计数与边界。
 
 ## 安装与依赖
@@ -12,19 +14,19 @@
 |---|---|
 | 官方 DSH | `0.2.1-rc.3` 起的受支持 0.2.x；本插件未验收 rc.2 |
 | Node.js | 24 或更新受支持版本 |
-| [RP Database 0.3.0](https://github.com/LiweiDonVee/dsh-rp-database/releases) | 必需，新流程提供 `apiVersion === 2`、`factReview=1` 与原子事实版本 |
-| [RP LastStep 0.4.0](https://github.com/LiweiDonVee/dsh-rp-last-step/releases) | 必需，新流程提供 `narrativeRevisions=1`、事实呈现与有效正文选择 |
-| [RP Context 0.3.0](https://github.com/LiweiDonVee/dsh-rp-context/releases) | 可选，新事实／正文修订的有效材料选取 |
-| [Loop Studio 0.1.0](https://github.com/LiweiDonVee/dsh-loop-studio/releases) | 可选，配置主 Agent 与已接入阶段的模型路由 |
+| [RP Database 0.3.1](https://github.com/LiweiDonVee/dsh-rp-database/releases) | 必需，新流程提供 `apiVersion === 2`、`factReview=1` 与原子事实版本 |
+| [RP LastStep 0.4.1](https://github.com/LiweiDonVee/dsh-rp-last-step/releases) | 必需，新流程提供 `narrativeRevisions=1`、事实呈现与有效正文选择 |
+| [RP Context 0.3.1](https://github.com/LiweiDonVee/dsh-rp-context/releases) | 可选，新事实／正文修订的有效材料选取 |
+| [Loop Studio 0.1.1](https://github.com/LiweiDonVee/dsh-loop-studio/releases) | 可选，配置主 Agent 与已接入阶段的模型路由 |
 
-可选阅读／存档界面使用 [RP Studio 1.4.0](https://github.com/LiweiDonVee/dsh-rp-studio/releases) 与 [StoryKit 0.2.0](https://github.com/LiweiDonVee/dsh-rp-story-kit/releases)。GM 本地安装包为 `dsh-rp-gm-0.2.0.tgz`，请与同批包的 SHA256SUMS 核对。
+可选阅读／存档界面使用 [RP Studio 1.5.0](https://github.com/LiweiDonVee/dsh-rp-studio/releases) 与 [StoryKit 0.2.1](https://github.com/LiweiDonVee/dsh-rp-story-kit/releases)。GM 本地安装包为 `dsh-rp-gm-0.2.1.tgz`，请与同批包的 SHA256SUMS 核对。
 
 将必需的三个 tgz 放在同一目录，在该目录打开终端；完全退出 DSH 后安装，再重启：
 
 ```powershell
 dsh plugin --profile desktop add ./dsh-rp-database-0.3.0.tgz
 dsh plugin --profile desktop add ./dsh-rp-last-step-0.4.0.tgz
-dsh plugin --profile desktop add ./dsh-rp-gm-0.2.0.tgz
+dsh plugin --profile desktop add ./dsh-rp-gm-0.2.1.tgz
 ```
 
 Web profile 将 desktop 改为 web。Windows 未配置 PATH 时，可用官方启动器：
@@ -33,7 +35,7 @@ Web profile 将 desktop 改为 web。Windows 未配置 PATH 时，可用官方�
 $gmCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd'
 & $gmCli plugin --profile desktop add ./dsh-rp-database-0.3.0.tgz
 & $gmCli plugin --profile desktop add ./dsh-rp-last-step-0.4.0.tgz
-& $gmCli plugin --profile desktop add ./dsh-rp-gm-0.2.0.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-gm-0.2.1.tgz
 ```
 
 旧 GM 0.1／Database 0.2／LastStep 0.3 的安装与验收属于 legacy 路径。新 GM 配旧 Database 时仅保留审批关闭的兼容流程，不传未知 capture，也不提供事实审批／重生；新材料修订使用上表组合。
@@ -42,7 +44,7 @@ $gmCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtim
 
 ## 不借助 StoryKit 开始
 
-1. 点击会话顶部 **故事 GM**，或右侧页签中的 **故事 GM**。
+1. 安装 RP Studio 1.5.0 时从 **RP ▾ → 故事 GM** 打开；单独安装时点击会话顶部 **故事 GM**，也可从右侧页签进入 **故事 GM**。
 2. 阅读原创公开样例“雨夜客栈”，在两个开场中选一个。
 3. 点击 **开始所选故事**。插件固定资料版本、建立空 sources 绑定和 @session 初始状态、绑定 ready profile，随后提交一次普通原生首轮提示。
 4. 面板显示原生会话 ID；在会话列表打开该故事，输入你的行动。
@@ -131,6 +133,6 @@ pnpm check
 pnpm package
 ```
 
-package 生成 `artifacts/dsh-rp-gm-0.2.0.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.2.0.tgz`。新流程需要上述具备 review/revision 能力的依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门、审批／生成恢复和原生面板。保留的 [native runner](scripts/native/README.md) 记录既有验收；V6 实际产品包的审批／两层重生五组功能断言全部通过，来源和发行验证边界见[当前原生证据](docs/native-acceptance.md)。
+package 生成 `artifacts/dsh-rp-gm-0.2.1.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.2.1.tgz`。新流程需要上述具备 review/revision 能力的依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门、审批／生成恢复和原生面板。保留的 [native runner](scripts/native/README.md) 记录既有验收；V6 实际产品包的审批／两层重生五组功能断言全部通过，来源和发行验证边界见[当前原生证据](docs/native-acceptance.md)。
 
 MIT License。

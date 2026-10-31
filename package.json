@@ -1,6 +1,6 @@
 {
   "name": "dsh-rp-gm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "通用原生 RP GM、故事开局与事实提交",
   "license": "MIT",
   "type": "module",
