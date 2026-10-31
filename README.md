@@ -24,8 +24,8 @@
 将必需的三个 tgz 放在同一目录，在该目录打开终端；完全退出 DSH 后安装，再重启：
 
 ```powershell
-dsh plugin --profile desktop add ./dsh-rp-database-0.3.0.tgz
-dsh plugin --profile desktop add ./dsh-rp-last-step-0.4.0.tgz
+dsh plugin --profile desktop add ./dsh-rp-database-0.3.1.tgz
+dsh plugin --profile desktop add ./dsh-rp-last-step-0.4.1.tgz
 dsh plugin --profile desktop add ./dsh-rp-gm-0.2.1.tgz
 ```
 
@@ -33,8 +33,8 @@ Web profile 将 desktop 改为 web。Windows 未配置 PATH 时，可用官方�
 
 ```powershell
 $gmCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd'
-& $gmCli plugin --profile desktop add ./dsh-rp-database-0.3.0.tgz
-& $gmCli plugin --profile desktop add ./dsh-rp-last-step-0.4.0.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-database-0.3.1.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-last-step-0.4.1.tgz
 & $gmCli plugin --profile desktop add ./dsh-rp-gm-0.2.1.tgz
 ```
 
