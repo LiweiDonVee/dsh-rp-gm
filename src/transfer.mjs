@@ -32,11 +32,12 @@ export function createGmTransfer({ctx,store,readSession,notify,factOperationLive
       view.parentSession=parentId;
       if(parentId){const parent=sources.get(parentId);if(!parent)required('The recorded GM ancestor Session is missing');verifyInheritedPrefix(sources.get(view.sessionId),parent);}
     }
+    const lineages=Object.freeze(state.payload.bindings.map(record=>Object.freeze({sessionId:record.binding.sessionId,parentSessionId:record.parentSessionId??null})));
     for(const record of state.payload.bindings){
       signal?.throwIfAborted();const {binding}=record,view=views.get(binding.sessionId);
       validateOpeningSource(record,view,views);
-      await verifyReviewSources(record,view,ctx.get('rpDatabase'),signal);
-      let database,profile,presentation;try{database=await ctx.get('rpDatabase').effectiveV2({sessionId:binding.sessionId,signal});profile=await ctx.get('rpLastStep').profile(binding.profile,signal);presentation=await ctx.get('rpLastStep').state(binding.sessionId,signal);}catch(error){if(['NOT_BOUND','NOT_FOUND','SESSION_NOT_FOUND','PROFILE_NOT_FOUND','BINDING_NOT_FOUND'].includes(error.code))required('Required Database or presentation state has not been restored');throw error;}
+      await verifyReviewSources(record,view,ctx.get('rpDatabase'),signal,lineages);
+      let database,profile,presentation;try{database=await ctx.get('rpDatabase').effectiveV2({sessionId:binding.sessionId,signal,lineages});profile=await ctx.get('rpLastStep').profile(binding.profile,signal);presentation=await ctx.get('rpLastStep').state(binding.sessionId,signal);}catch(error){if(['NOT_BOUND','NOT_FOUND','SESSION_NOT_FOUND','PROFILE_NOT_FOUND','BINDING_NOT_FOUND'].includes(error.code))required('Required Database or presentation state has not been restored');throw error;}
       if(database.binding?.schemaVersion!==2||!sameRefs(database.binding.factEntryRefs??[],binding.factEntryRefs))invalid('Database fact binding does not match GM registered references');
       await validateInitialSources(ctx.get('rpDatabase'),binding.sources,signal);
       const keys=new Set(database.entries.map(entry=>entryKey(entry.ref)));if(binding.factEntryRefs.some(ref=>!keys.has(entryKey(ref))))required('A registered GM state entry is missing');readState(database);
@@ -44,7 +45,7 @@ export function createGmTransfer({ctx,store,readSession,notify,factOperationLive
       const current=presentation.binding;if(typeof current?.profileId!=='string'||!Number.isSafeInteger(current.version)||current.version<1)required('Current LastStep binding is unavailable');
       let style;try{style=await ctx.get('rpLastStep').profile({profileId:current.profileId,version:current.version},signal);}catch(error){if(error.code==='PROFILE_NOT_FOUND')required('Current LastStep style has not been restored');throw error;}
       if(style.profile?.status!=='ready'||style.profile.id!==current.profileId||style.profile.version!==current.version)required('Current LastStep style is not ready');
-      const narratives=await ctx.get('rpLastStep').narratives({sessionId:binding.sessionId,signal});
+      const narratives=await ctx.get('rpLastStep').narratives({sessionId:binding.sessionId,signal,lineages});
       for(const item of [...record.review?.decisions??[],...record.review?.presentations??[]])if(item.result?.presentation.status==='complete'&&!narratives.records.some(value=>value.factReceiptId===item.result.factReceiptId&&value.ref?.presentationId===item.result.presentation.presentationId))invalid('Completed GM writing metadata lacks its accepted canonical LastStep record');
       if(binding.status==='active'){
         const receiptId=record.opening?.receiptId;if(!receiptId||!acceptedFactPresentations(view).some(item=>item.factReceiptId===receiptId)||!narratives.records.some(item=>item.factReceiptId===receiptId))invalid('Active GM metadata lacks its accepted canonical opening');
