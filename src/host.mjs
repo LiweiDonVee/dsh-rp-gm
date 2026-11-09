@@ -8,6 +8,8 @@ import {createStoryBranches} from './branches.mjs';
 import {createGmTransfer} from './transfer.mjs';
 import {createFactReview} from './review.mjs';
 import {createFactGenerator} from './fact-model.mjs';
+import {usesNativeTools} from './native-tools.mjs';
+import {createSessionLineage} from './lineage.mjs';
 
 export const name='rp-gm';
 export const inject=['connection','typertGateway','agents','tools','systemPrompt','agentPresets','commands','sessionQuery','llm'];
@@ -15,6 +17,7 @@ export const PRESET_ID='rp-gm';
 
 export async function createGmHost(ctx,options={}) {
   const store=options.store??createBindingStore({directory:options.directory??join(process.env.DSH_HOME??join(homedir(),'.dsh'),'app-data','rp-gm')}),readSession=options.readSession??createSessionReader(ctx);
+  const sessionLineage=createSessionLineage({ctx,store,readSession});
   const tasks=new Map(),operations=new Map(),subscribers=new Map(),disposers=[];let stopped=false,adapter;
   const notify=id=>{for(const fn of subscribers.get(id)??[])try{fn({type:'changed',sessionId:id});}catch{/* Observers do not own committed state. */}};
   async function run(signal,work){if(stopped)fail('UNAVAILABLE','GM plugin is unloaded',503);const life=new AbortController(),combined=signal?AbortSignal.any([signal,life.signal]):life.signal;combined.throwIfAborted();const pending=Promise.resolve().then(()=>work(combined));operations.set(life,pending);try{return await pending;}finally{operations.delete(life);}}
@@ -40,7 +43,7 @@ export async function createGmHost(ctx,options={}) {
       let snapshot=await readSession(journal.sessionId,signal);
       if(snapshot&&snapshot.header.agentPreset!==PRESET_ID)fail('SESSION_CONFLICT','Reserved session belongs to another preset',409);
       if(!snapshot){const created=await ctx.typertGateway.invoke({namespace:'session',method:'create',args:{request:{sessionId:journal.sessionId,agentPreset:PRESET_ID}},peer:ctx.connection.browserPeer,signal});if(created.sessionId!==journal.sessionId)fail('SESSION_CONFLICT','Host did not retain the reserved session identity',409);}
-      if(ctx.tools.get('run_code',ctx.agents.get(journal.sessionId))!==undefined)fail('NATIVE_TOOLS_REQUIRED','Configure native tools before starting a GM story',409);
+      if(!usesNativeTools(ctx,ctx.agents.get(journal.sessionId)))fail('NATIVE_TOOLS_REQUIRED','Configure native tools before starting a GM story',409);
       if(!journal.progress.created)journal=await store.checkpoint(request.launchId,'created');
       if(!journal.progress.sources){await db.bindSources({sessionId:journal.sessionId,sources:clone(request.sources),expectedRevision:(await db.state({signal})).revision,resetOverlay:false,signal});journal=await store.checkpoint(request.launchId,'sources');}
       if(!journal.progress.initialized){await db.initializeStoryState({sessionId:journal.sessionId,entries:seedEntries(request),factEntryRefs:clone(record.binding.factEntryRefs),launchId:request.launchId,expectedRevision:(await db.state({signal})).revision,signal});journal=await store.checkpoint(request.launchId,'initialized');}
@@ -53,7 +56,8 @@ export async function createGmHost(ctx,options={}) {
       await store.checkpoint(request.launchId,'prompt');notify(journal.sessionId);return result(await store.binding(journal.sessionId));
     }catch(error){if(record)await store.setStatus(journal.sessionId,'failed');await store.diagnostic(request.launchId,error);notify(journal.sessionId);throw error;}
   }
-  const service={apiVersion:1,capabilities:{factReview:1,factRegeneration:1},
+  const service={apiVersion:1,capabilities:{factReview:1,factRegeneration:1,sessionLineage:1},
+    sessionLineage:input=>run(input.signal,signal=>sessionLineage({...input,signal})),
     reviewState:input=>run(input.signal,signal=>review.reviewState({...input,signal})),
     configureReview:input=>run(input.signal,signal=>review.configureReview({...input,signal})),
     decideFacts:input=>run(input.signal,signal=>review.decideFacts({...input,signal})),

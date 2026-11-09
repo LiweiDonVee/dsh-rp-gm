@@ -13,7 +13,7 @@ export function projectSession(snapshot) {
   }
   const activeSeqs=new Set(nodes.flatMap(seq=>semantic.get(seq)??[seq]));
   const activeAssistantIds=events.filter(event=>activeSeqs.has(event.seq)&&event.type==='assistant/message'&&typeof event.data?.message?.id==='string').map(event=>event.data.message.id);
-  return {header:snapshot.header,sessionId:snapshot.header?.id,events,visible:nodes.map(seq=>bySeq.get(seq)),activeEvents:events.filter(event=>activeSeqs.has(event.seq)),activeSeqs,activeAssistantIds};
+  return {header:snapshot.header,sessionId:snapshot.header?.id,parentSession:snapshot.parentSession??snapshot.header?.parentSession,inheritedEventCount:snapshot.inheritedEventCount,events,visible:nodes.map(seq=>bySeq.get(seq)),activeEvents:events.filter(event=>activeSeqs.has(event.seq)),activeSeqs,activeAssistantIds};
 }
 
 export function canonicalToolResults(view,names,{includeErrors=false}={}) {

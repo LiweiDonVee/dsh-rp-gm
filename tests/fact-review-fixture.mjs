@@ -10,7 +10,7 @@ import {acceptedFactPresentations,projectSession} from '../src/session.mjs';
 export async function reviewFixture(t,options={},setup){
   const f=nativeFixture(await contractFixture(t)),commands=new Map(),rounds=new Map(),decisions=new Map(),commandInputs=[],generationInputs=[],stages=[],presentations=[],acceptedProse=[];
   f.ctx.commands={register:definition=>{commands.set(definition.name,definition);return()=>commands.delete(definition.name);}};
-  f.ctx.sessionQuery={observeSession:async id=>({events:clone(f.sessions.get(id).events),[Symbol.dispose](){}})};
+  f.ctx.sessionQuery={observeSession:async id=>({header:clone(f.sessions.get(id).session.header),events:clone(f.sessions.get(id).events),inheritedEventCount:f.sessions.get(id).session.inheritedEventCount??0,[Symbol.dispose](){}})};
   const invoke=f.ctx.typertGateway.invoke;
   f.ctx.typertGateway.invoke=async input=>{
     if(input.namespace!=='commands')return invoke(input);

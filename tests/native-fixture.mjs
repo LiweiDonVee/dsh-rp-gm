@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';import {GmError,clone,entryKey,requestFingerprint} from '../src/core.mjs';
 export function nativeFixture(f){
   const invoke=f.ctx.typertGateway.invoke;f.forks=[];f.profileInherits=[];
-  f.ctx.typertGateway.invoke=async input=>{if(input.namespace!=='session'||input.method!=='fork')return invoke(input);const request=input.args.request,parent=f.sessions.get(request.sessionId),child=f.makeAgent(randomUUID(),parent.id);child.events.push(...clone(parent.events.filter(event=>request.atSeq===undefined||event.seq<=request.atSeq)));f.forks.push(clone(request));await f.emit('agent/created',{agent:child});return {sessionId:child.id};};
+  f.ctx.typertGateway.invoke=async input=>{if(input.namespace!=='session'||input.method!=='fork')return invoke(input);const request=input.args.request,parent=f.sessions.get(request.sessionId),child=f.makeAgent(randomUUID(),parent.id);child.events.push(...clone(parent.events.filter(event=>request.atSeq===undefined||event.seq<=request.atSeq)));child.session.inheritedEventCount=child.events.length;f.forks.push(clone(request));await f.emit('agent/created',{agent:child});return {sessionId:child.id};};
   f.last.inheritSession=async input=>{const child=f.sessions.get(input.sessionId);if(child.session.header.parentSession!==input.parentSessionId)throw new GmError('INVALID_ANCESTRY','not a child',403);if(!f.lastBindings.has(child.id)){f.lastBindings.set(child.id,clone(f.lastBindings.get(input.parentSessionId)));f.profileInherits.push(input.sessionId);}return {binding:clone(f.lastBindings.get(child.id))};};
   f.db.factAccess=async({sessionId,agent})=>{
     if(f.sessions.get(sessionId)!==agent)throw new GmError('AGENT_MISMATCH','wrong agent',403);

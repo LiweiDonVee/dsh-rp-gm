@@ -1,4 +1,5 @@
 import {fail,object} from './core.mjs';
+import {usesNativeTools} from './native-tools.mjs';
 export const TOOL_NAMES=Object.freeze(['rp_gm_state','rp_begin_story','rp_commit_turn','rp_propose_turn']);
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
 const output={schema:{type:'object'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -20,7 +21,7 @@ export async function registerGmAgent(ctx,runtime,contextFor) {
     if(stopped)return;const existing=scopes.get(agent);if(existing){if(retrySetup)await runtime.ensure(agent,existing.life.signal);return;}
     const record={tools:[],restriction:undefined,life:new AbortController()};scopes.set(agent,record);
     let bound;try{bound=await runtime.ensure(agent,record.life.signal);}catch(error){if(record.life.signal.aborted)return;scopes.delete(agent);throw error;}if(stopped||scopes.get(agent)!==record)return;
-    if(bound&&ctx.tools.get('run_code',agent)===undefined){
+    if(bound&&usesNativeTools(ctx,agent)){
       for(const definition of definitions)record.tools.push(agent.ctx.tools.register({...definition,output,finalizeContent,execute:async(args,exec)=>{
         try{if(!object(args)||Object.keys(args).some(key=>!Object.hasOwn(definition.parameters.properties,key)))fail('INVALID_TOOL_ARGUMENTS','Unexpected GM tool arguments');
           exec.signal.throwIfAborted();return await (['commit','propose'].includes(definition.method)?runtime[definition.method](args,exec):runtime[definition.method](exec));

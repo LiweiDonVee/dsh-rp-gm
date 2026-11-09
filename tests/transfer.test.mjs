@@ -7,6 +7,7 @@ async function source(t,afterRead,startInput=launch()){const f=nativeFixture(awa
 async function destination(t,from){
   const f=await contractFixture(t),observations=new Map([[from.id,await from.readSession(from.id)]]),snapshot=await from.db.effectiveV2({sessionId:from.id});let reads=0,agentReads=0;
   f.options.readSession=async id=>{reads++;return structuredClone(observations.get(id)??null);};
+  f.ctx.sessionQuery.observeSession=async id=>({...structuredClone(observations.get(id)),inheritedEventCount:observations.get(id)?.inheritedEventCount??0,[Symbol.dispose](){}});
   f.db.effectiveV2=async()=>structuredClone(snapshot);f.db.factAccess=async()=>{agentReads++;throw Error('Pre-resume restore cannot manufacture a fact Agent');};
   f.last.profile=(...args)=>from.last.profile(...args);f.last.state=(...args)=>from.last.state(...args);f.last.narratives=(...args)=>from.last.narratives(...args);
   const service=await createGmHost(f.ctx,f.options);t.after(()=>service.close());return {...f,service,observations,reads:()=>reads,agentReads:()=>agentReads};

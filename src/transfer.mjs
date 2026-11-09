@@ -4,6 +4,7 @@ import {acceptedFactPresentations,projectSession} from './session.mjs';
 import {envelope,normalizeState,sessionIds} from './transfer-schema.mjs';
 import {validateInitialSources} from './sources.mjs';
 import {needsReviewOwners,verifyReviewSources} from './review-transfer.mjs';
+import {verifyInheritedPrefix} from './lineage.mjs';
 
 const required=message=>fail('RESTORE_REQUIREMENT_MISSING',message,409);
 const invalid=message=>fail('RESTORE_PAYLOAD_INVALID',message,400);
@@ -15,7 +16,7 @@ function validateOpeningSource(record,view,views){
   if(!assistant||!call||source.callSeq!==undefined&&call.seq!==source.callSeq||!assistant.data.message.content?.some(block=>block.type==='tool-call'&&block.name==='rp_begin_story'&&block.id===source.callId))invalid('Opening source is not a real canonical GM call');
   const start=view.events.find(event=>event.seq===source.turnStartSeq&&event.type==='turn/start');if(!start||start.data?.turn!==call.data.turn||start.seq>=assistant.seq||assistant.seq>=call.seq)invalid('Opening source is outside its canonical turn');
   const [origin]=JSON.parse(record.opening.turnKey);let cursor=record.binding.sessionId;const seen=new Set();
-  while(cursor!==origin&&!seen.has(cursor)){seen.add(cursor);cursor=views.get(cursor)?.header.parentSession;}
+  while(cursor!==origin&&!seen.has(cursor)){seen.add(cursor);cursor=views.get(cursor)?.parentSession;}
   if(cursor!==origin)invalid('Opening source does not belong to this Session ancestry');
 }
 export function createGmTransfer({ctx,store,readSession,notify,factOperationLive}){
@@ -24,10 +25,16 @@ export function createGmTransfer({ctx,store,readSession,notify,factOperationLive
   async function available(state,ids,signal){
     const missing=requirements(state);if(missing.length)required(`Required owner services are missing: ${missing.join(', ')}`);
     const views=new Map(),sources=new Map();
-    for(const id of ids){signal?.throwIfAborted();const observed=await readSession(id,signal);if(!observed)required(`Canonical destination Session is missing: ${id}`);if(observed.header?.id!==id||observed.header.agentPreset!=='rp-gm')invalid('Session identity or generic preset does not match GM metadata');sources.set(id,clone(observed));views.set(id,projectSession(observed));}
+    for(const id of ids){signal?.throwIfAborted();const observed=await readSession(id,signal);if(!observed)required(`Canonical destination Session is missing: ${id}`);if(observed.header?.id!==id||observed.header.agentPreset!=='rp-gm')invalid('Session identity or generic preset does not match GM metadata');const actual=await ctx.sessionQuery.observeSession(id,{projections:'none',signal});try{const ordered=[...observed.events].sort((left,right)=>left.seq-right.seq);if(!isDeepStrictEqual(actual.events,ordered))fail('EXPORT_CHANGED','Canonical Session changed during lineage verification',409);sources.set(id,{...clone(observed),events:ordered,inheritedEventCount:actual.inheritedEventCount});views.set(id,projectSession(sources.get(id)));}finally{actual[Symbol.dispose]();}}
+    for(const record of state.payload.bindings){
+      const view=views.get(record.binding.sessionId),parentId=record.parentSessionId;
+      if(view.header.parentSession!==undefined&&view.header.parentSession!==parentId)invalid('GM binding ancestry conflicts with the canonical legacy parent');
+      view.parentSession=parentId;
+      if(parentId){const parent=sources.get(parentId);if(!parent)required('The recorded GM ancestor Session is missing');verifyInheritedPrefix(sources.get(view.sessionId),parent);}
+    }
     for(const record of state.payload.bindings){
       signal?.throwIfAborted();const {binding}=record,view=views.get(binding.sessionId);
-      if((view.header.parentSession??undefined)!==(record.parentSessionId??undefined))invalid('GM binding ancestry does not match canonical Session header');validateOpeningSource(record,view,views);
+      validateOpeningSource(record,view,views);
       await verifyReviewSources(record,view,ctx.get('rpDatabase'),signal);
       let database,profile,presentation;try{database=await ctx.get('rpDatabase').effectiveV2({sessionId:binding.sessionId,signal});profile=await ctx.get('rpLastStep').profile(binding.profile,signal);presentation=await ctx.get('rpLastStep').state(binding.sessionId,signal);}catch(error){if(['NOT_BOUND','NOT_FOUND','SESSION_NOT_FOUND','PROFILE_NOT_FOUND','BINDING_NOT_FOUND'].includes(error.code))required('Required Database or presentation state has not been restored');throw error;}
       if(database.binding?.schemaVersion!==2||!sameRefs(database.binding.factEntryRefs??[],binding.factEntryRefs))invalid('Database fact binding does not match GM registered references');
