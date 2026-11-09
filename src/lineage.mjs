@@ -13,7 +13,7 @@ export function createSessionLineage({ctx,store,readSession}){
   async function observe(id,signal){
     signal?.throwIfAborted();
     if(!await readSession(id,signal))fail('SESSION_NOT_FOUND','The lineage Session is unavailable',404);
-    const view=await ctx.sessionQuery.observeSession(id,{projections:'none',signal});
+    const view=await ctx.sessionQuery.observeSession(id,{projectionMode:'none',signal});
     try{signal?.throwIfAborted();return{header:clone(view.header),events:clone(view.events),inheritedEventCount:view.inheritedEventCount};}
     finally{view[Symbol.dispose]();}
   }

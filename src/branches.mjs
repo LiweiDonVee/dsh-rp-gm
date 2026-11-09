@@ -24,13 +24,13 @@ export function createStoryBranches({ctx,store,runtime,database,readSession,noti
     if(typeof last?.inheritSession!=='function')fail('LAST_STEP_INHERIT_UNAVAILABLE','RP LastStep with causal child profile inheritance is required',503);
     if(atSeq!==undefined&&(!Number.isSafeInteger(atSeq)||atSeq<0))fail('INVALID_PREFIX','Fork prefix must be a nonnegative canonical sequence');
     if(expected&&(current.lastFactReceipt?.id!==expected.lastFactReceipt.id||rollbackBoundary(current.view,current.lastFactReceipt,current.record.opening?.receiptId)!==atSeq||!isDeepStrictEqual(current.view.events,expected.view.events)||!isDeepStrictEqual(current.agent.session.snapshotEvents(),current.view.events)))fail('ROLLBACK_UNAVAILABLE','Story input changed before rollback; inspect it again',409);
-    const source=await ctx.sessionQuery.observeSession(input.sessionId,{projections:'none',signal:input.signal});let sourceEvents;
+    const source=await ctx.sessionQuery.observeSession(input.sessionId,{projectionMode:'none',signal:input.signal});let sourceEvents;
     try{if(source.header.id!==input.sessionId||!isDeepStrictEqual(source.events,current.view.events))fail('EXPORT_CHANGED','Story input changed before the fork request',409);sourceEvents=clone(source.events);}
     finally{source[Symbol.dispose]();}
     const created=await ctx.typertGateway.invoke({namespace:'session',method:'fork',args:{request:{sessionId:input.sessionId,...atSeq===undefined?{}:{atSeq}}},peer:ctx.connection.browserPeer,signal:input.signal});
     const child=await readSession(created.sessionId,input.signal);
     if(!child||child.header.id!==created.sessionId||child.header.parentSession!==undefined&&child.header.parentSession!==input.sessionId)fail('INVALID_ANCESTRY','Host returned a conflicting child identity',409);
-    const observed=await ctx.sessionQuery.observeSession(created.sessionId,{projections:'none',signal:input.signal});
+    const observed=await ctx.sessionQuery.observeSession(created.sessionId,{projectionMode:'none',signal:input.signal});
     try{
       if(observed.header.id!==created.sessionId)fail('INVALID_ANCESTRY','Host returned a different observed child',409);
       const count=verifyInheritedPrefix({header:observed.header,events:observed.events,inheritedEventCount:observed.inheritedEventCount},{events:sourceEvents});

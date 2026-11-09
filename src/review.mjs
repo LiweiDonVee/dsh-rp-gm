@@ -18,7 +18,7 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
   }
   async function exclusive(input,work,kind='decision'){if(live.has(input.sessionId))fail('STORY_BUSY','Another fact operation is still running',409);const life=new AbortController(),signal=input.signal?AbortSignal.any([input.signal,life.signal]):life.signal;live.set(input.sessionId,{life,kind,operationId:input.operationId});try{await owned({...input,signal},true);return await work({...input,signal});}finally{live.delete(input.sessionId);}}
   async function events(sessionId,signal){
-    if(ctx.sessionQuery?.observeSession){const view=await ctx.sessionQuery.observeSession(sessionId,{projections:'none'});try{signal?.throwIfAborted();return clone(view.events);}finally{view[Symbol.dispose]();}}
+    if(ctx.sessionQuery?.observeSession){const view=await ctx.sessionQuery.observeSession(sessionId,{projectionMode:'none'});try{signal?.throwIfAborted();return clone(view.events);}finally{view[Symbol.dispose]();}}
     return (await viewFor(sessionId,ctx.agents.get(sessionId),signal))?.events??[];
   }
   function validRun(rows,source,name,operationId,hash){const matches=rows.filter(row=>row.type==='command/run'&&row.data?.commandId===source.commandId);if(matches.length!==1||matches[0].seq!==source.runSeq||matches[0].data.name!==name||matches[0].data.source?.kind!=='user'||JSON.stringify(tokens(matches[0].data.args))!==JSON.stringify([operationId,hash]))fail('DECISION_SOURCE_INVALID','The exact owner command source is unavailable',403);return matches[0];}
