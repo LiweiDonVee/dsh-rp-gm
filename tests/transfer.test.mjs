@@ -7,6 +7,7 @@ async function source(t,afterRead,startInput=launch()){const f=nativeFixture(awa
 async function destination(t,from){
   const f=await contractFixture(t),observations=new Map([[from.id,await from.readSession(from.id)]]),snapshot=await from.db.effectiveV2({sessionId:from.id});let reads=0,agentReads=0;
   f.options.readSession=async id=>{reads++;return structuredClone(observations.get(id)??null);};
+  f.ctx.sessionQuery.observeSession=async id=>({...structuredClone(observations.get(id)),inheritedEventCount:observations.get(id)?.inheritedEventCount??0,[Symbol.dispose](){}});
   f.db.effectiveV2=async()=>structuredClone(snapshot);f.db.factAccess=async()=>{agentReads++;throw Error('Pre-resume restore cannot manufacture a fact Agent');};
   f.last.profile=(...args)=>from.last.profile(...args);f.last.state=(...args)=>from.last.state(...args);f.last.narratives=(...args)=>from.last.narratives(...args);
   const service=await createGmHost(f.ctx,f.options);t.after(()=>service.close());return {...f,service,observations,reads:()=>reads,agentReads:()=>agentReads};
@@ -28,6 +29,13 @@ test('restore validates real owner projections before resume and persists only r
   const result=await d.service.restoreState({restoreId:'restore-one',sessionIds:[f.id],state,expectedRevision:(await d.service.contentRevision({})).revision});assert.deepEqual(result.restoredSessionIds,[f.id]);assert.equal(d.agentReads(),0);assert.equal(d.sessions.size,0);
   const record=await createBindingStore({directory:d.directory}).binding(f.id);assert.equal(record.binding.status,'restoring');assert.deepEqual(record.binding.character,launch().character);assert.equal((await d.service.listStories({})).stories[0].status,'restoring');
   const reads=d.reads();d.observations.clear();assert.deepEqual(await d.service.restoreState({restoreId:'restore-one',sessionIds:[f.id],state,expectedRevision:0}),result);assert.equal(d.reads(),reads);
+});
+test('restore verification passes only its verified immutable lineage to dependent owner reads',async t=>{
+  const f=await source(t),state=await f.service.exportState({sessionIds:[f.id]}),d=await destination(t,f),expected=[{sessionId:f.id,parentSessionId:null}],seen=[];
+  for(const[owner,method]of [[d.db,'effectiveV2'],[d.last,'narratives']]){const original=owner[method];owner[method]=async input=>{assert.deepEqual(input.lineages,expected);assert(Object.isFrozen(input.lineages));assert(input.lineages.every(Object.isFrozen));seen.push(method);return original(input);};}
+  await d.service.reserveRestore({restoreId:'verified-lineage',sessionIds:[f.id]});
+  const result=await d.service.restoreState({restoreId:'verified-lineage',sessionIds:[f.id],state,expectedRevision:(await d.service.contentRevision()).revision});
+  assert.deepEqual(result.restoredSessionIds,[f.id]);assert.deepEqual(seen,['effectiveV2','narratives']);
 });
 test('failed proof leaves GM data and revision unchanged while completed identity checks precede deeper proof',async t=>{
   const f=await source(t),state=await f.service.exportState({sessionIds:[f.id]}),d=await destination(t,f);await d.service.reserveRestore({restoreId:'restore-one',sessionIds:[f.id]});const original=d.observations.get(f.id);d.observations.clear();

@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {normalizeState} from '../src/transfer-schema.mjs';import {reviewFixture,propose,decisionInput} from './fact-review-fixture.mjs';
 test('SavedStory GM payload retains explicit review policy and immutable decision coordination',async t=>{
   const f=await reviewFixture(t,{factApprovalDefault:true});await propose(f);f.faults.runOnly=true;await assert.rejects(f.service.decideFacts(decisionInput(f,await f.service.reviewState({sessionId:f.id}))),{code:'LOST_RESPONSE'});
+  const read=f.db.factReviewState;f.db.factReviewState=async input=>{assert.deepEqual(input.lineages,[{sessionId:f.id,parentSessionId:null}]);assert(Object.isFrozen(input.lineages));return read(input);};
   const exported=await f.service.exportState({sessionIds:[f.id]}),record=exported.payload.bindings[0];assert.equal(record.review.enabled,true);assert.equal(record.review.decisions[0].request.action,'approve');assert.equal(JSON.stringify(record.review).includes('密封信件'),false);assert.deepEqual(normalizeState(exported,[f.id]),exported);
   const forged=structuredClone(exported);forged.payload.bindings[0].review.decisions[0].requestHash='0'.repeat(64);assert.throws(()=>normalizeState(forged,[f.id]),{code:'RESTORE_PAYLOAD_INVALID'});
 });

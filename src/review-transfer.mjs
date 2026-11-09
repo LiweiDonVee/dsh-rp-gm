@@ -29,9 +29,9 @@ export function normalizeReview(value,sessionId){
   return clone(value);
 }
 export function needsReviewOwners(state){return state.payload.bindings.some(record=>record.review&&(record.review.enabled||record.review.decisions.length||record.review.generations.length||record.review.presentations?.length));}
-export async function verifyReviewSources(record,view,db,signal){
+export async function verifyReviewSources(record,view,db,signal,lineages){
   const review=record.review;if(!review||!review.decisions.length&&!review.generations.length&&!review.presentations?.length)return;
-  const state=await db.factReviewState({sessionId:record.binding.sessionId,signal});
+  const state=await db.factReviewState({sessionId:record.binding.sessionId,signal,...lineages===undefined?{}:{lineages}});
   function actual(source,name,operationId,requestHash,expected){
     if(!source)return;const runs=view.events.filter(event=>event.type==='command/run'&&event.data?.commandId===source.commandId),run=runs[0];
     if(runs.length!==1||run.seq!==source.runSeq||run.data.name!==name||run.data.source?.kind!=='user'||JSON.stringify(run.data.args?.trim().split(/\s+/u))!==JSON.stringify([operationId,requestHash]))invalid('Review metadata lacks its exact canonical owner command');

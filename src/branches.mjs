@@ -2,6 +2,8 @@ import {clone,entryKey,fail,readState,requestFingerprint,text} from './core.mjs'
 import {acceptedFactPresentations} from './session.mjs';
 import {validateInitialSources} from './sources.mjs';
 import {rollbackBoundary} from './rollback.mjs';import {isDeepStrictEqual} from 'node:util';
+import {usesNativeTools} from './native-tools.mjs';
+import {verifyInheritedPrefix} from './lineage.mjs';
 
 function restoreInput(input){text(input.restoreId,'Restore ID');if(!Array.isArray(input.sessionIds)||!input.sessionIds.length||new Set(input.sessionIds).size!==input.sessionIds.length||input.sessionIds.some(id=>typeof id!=='string'||!id.trim()))fail('INVALID_RESTORE','Restore requires distinct destination session IDs');return [...input.sessionIds].sort();}
 
@@ -22,8 +24,18 @@ export function createStoryBranches({ctx,store,runtime,database,readSession,noti
     if(typeof last?.inheritSession!=='function')fail('LAST_STEP_INHERIT_UNAVAILABLE','RP LastStep with causal child profile inheritance is required',503);
     if(atSeq!==undefined&&(!Number.isSafeInteger(atSeq)||atSeq<0))fail('INVALID_PREFIX','Fork prefix must be a nonnegative canonical sequence');
     if(expected&&(current.lastFactReceipt?.id!==expected.lastFactReceipt.id||rollbackBoundary(current.view,current.lastFactReceipt,current.record.opening?.receiptId)!==atSeq||!isDeepStrictEqual(current.view.events,expected.view.events)||!isDeepStrictEqual(current.agent.session.snapshotEvents(),current.view.events)))fail('ROLLBACK_UNAVAILABLE','Story input changed before rollback; inspect it again',409);
+    const source=await ctx.sessionQuery.observeSession(input.sessionId,{projectionMode:'none',signal:input.signal});let sourceEvents;
+    try{if(source.header.id!==input.sessionId||!isDeepStrictEqual(source.events,current.view.events))fail('EXPORT_CHANGED','Story input changed before the fork request',409);sourceEvents=clone(source.events);}
+    finally{source[Symbol.dispose]();}
     const created=await ctx.typertGateway.invoke({namespace:'session',method:'fork',args:{request:{sessionId:input.sessionId,...atSeq===undefined?{}:{atSeq}}},peer:ctx.connection.browserPeer,signal:input.signal});
-    const child=await readSession(created.sessionId,input.signal);if(child?.header.parentSession!==input.sessionId)fail('INVALID_ANCESTRY','Host did not return the requested child ancestry',409);
+    const child=await readSession(created.sessionId,input.signal);
+    if(!child||child.header.id!==created.sessionId||child.header.parentSession!==undefined&&child.header.parentSession!==input.sessionId)fail('INVALID_ANCESTRY','Host returned a conflicting child identity',409);
+    const observed=await ctx.sessionQuery.observeSession(created.sessionId,{projectionMode:'none',signal:input.signal});
+    try{
+      if(observed.header.id!==created.sessionId)fail('INVALID_ANCESTRY','Host returned a different observed child',409);
+      const count=verifyInheritedPrefix({header:observed.header,events:observed.events,inheritedEventCount:observed.inheritedEventCount},{events:sourceEvents});
+      if(atSeq!==undefined&&count!==atSeq+1)fail('INVALID_ANCESTRY','Host did not preserve the requested exact fork prefix',409);
+    }finally{observed[Symbol.dispose]();}
     await store.inherit(input.sessionId,created.sessionId);
     try{
       await database().effectiveV2({sessionId:created.sessionId,signal:input.signal});await last.inheritSession({parentSessionId:input.sessionId,sessionId:created.sessionId,signal:input.signal});
@@ -53,7 +65,7 @@ export function createStoryBranches({ctx,store,runtime,database,readSession,noti
         if(initial.profile?.id!==record.binding.profile.profileId||initial.profile.version!==record.binding.profile.version)fail('RESTORE_INCOMPLETE','Initial launch style provenance is unavailable',409);
         if(typeof binding?.profileId!=='string'||!Number.isSafeInteger(binding.version)||binding.version<1)fail('RESTORE_INCOMPLETE','Current presentation binding is unavailable',409);
         const activeProfile=await last.profile({profileId:binding.profileId,version:binding.version},input.signal);
-        if(activeProfile.profile?.status!=='ready'||activeProfile.profile.id!==binding.profileId||activeProfile.profile.version!==binding.version||ctx.tools.get('run_code',agent)!==undefined||typeof last.isEnabled==='function'&&!last.isEnabled(id))fail('RESTORE_INCOMPLETE','Current presentation style or native admission is unavailable',409);
+        if(activeProfile.profile?.status!=='ready'||activeProfile.profile.id!==binding.profileId||activeProfile.profile.version!==binding.version||!usesNativeTools(ctx,agent)||typeof last.isEnabled==='function'&&!last.isEnabled(id))fail('RESTORE_INCOMPLETE','Current presentation style or native admission is unavailable',409);
         const latest=await receiptProof(current,snapshot,record,id);
         if(gate.priorStatus==='active'){
           if(!latest)fail('RESTORE_INCOMPLETE','Active restored story requires an active factual receipt',409);

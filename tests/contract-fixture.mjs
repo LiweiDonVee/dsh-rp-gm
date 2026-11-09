@@ -16,7 +16,8 @@ export async function contractFixture(t){
   };
   const ctx={get:name=>services.get(name),provide:(name,value)=>services.set(name,value),connection:{browserPeer:{principal:{kind:'owner'}}},
     agents:{get:id=>sessions.get(id),list:()=>[...sessions.values()],currentInitiator:()=>ctx.currentAgent},
-    tools:{get:(name,agent)=>name==='run_code'?undefined:agent?.denied.has(name)?undefined:agent?.tools.get(name)},
+    sessionQuery:{observeSession:async id=>{const agent=sessions.get(id);if(!agent)throw new GmError('SESSION_NOT_FOUND','missing',404);return{header:clone(agent.session.header),events:clone(agent.events),inheritedEventCount:agent.session.inheritedEventCount??0,[Symbol.dispose](){}};}},
+    tools:{selectExecutor:()=>({describe:()=>({schemas:[]})}),get:(name,agent)=>name==='run_code'?undefined:agent?.denied.has(name)?undefined:agent?.tools.get(name)},
     systemPrompt:{context:definition=>{contexts.push(definition);return()=>contexts.splice(contexts.indexOf(definition),1);}},
     on:(name,fn)=>{const list=listeners.get(name)??[];list.push(fn);listeners.set(name,list);return()=>list.splice(list.indexOf(fn),1);},emit:(name,...args)=>{void emit(name,...args);},effect:fn=>effects.push(fn()),
     agentPresets:{register:async definition=>{if(presets.has(definition.id))throw Error('duplicate preset');presets.set(definition.id,clone(definition));return()=>{presets.delete(definition.id);counts.presetDisposals++;};}},
