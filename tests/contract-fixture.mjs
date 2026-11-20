@@ -7,6 +7,7 @@ export async function contractFixture(t){
   const directory=await mkdtemp(join(tmpdir(),'rp-gm-host-'));t.after(()=>rm(directory,{recursive:true,force:true}));
   const sessions=new Map(),listeners=new Map(),presets=new Map(),services=new Map(),effects=[],contexts=[],states=new Map(),profiles=new Map(),lastBindings=new Map(),prompts=new Set();
   const counts={creates:0,prompts:0,binds:0,initializes:0,factWrites:0,presetDisposals:0,profileBinds:0},faults={};let revision=0,profileRevision=0;
+  const durableEvents=new Map();
   const emit=async(name,...args)=>{const snapshot=(listeners.get(name)??[]).slice();for(const fn of snapshot)await fn(...args);};
   const append=(agent,type,data,surfaceOp,sourceEventSeqs)=>{const event={seq:agent.events.length,type,data,...surfaceOp?{surfaceOp}:{},...sourceEventSeqs?{sourceEventSeqs}:{}};agent.events.push(event);return event;};
   const makeAgent=(id,parentSession)=>{
@@ -15,7 +16,8 @@ export async function contractFixture(t){
     sessions.set(id,agent);return agent;
   };
   const ctx={get:name=>services.get(name),provide:(name,value)=>services.set(name,value),connection:{browserPeer:{principal:{kind:'owner'}}},
-    agents:{get:id=>sessions.get(id),list:()=>[...sessions.values()],currentInitiator:()=>ctx.currentAgent},
+    agents:{get:id=>sessions.get(id),list:()=>[...sessions.values()],currentInitiator:()=>ctx.currentAgent,turnBoundaryOf:()=>({openTurnStartSeq:null})},
+    sessions:{get:id=>sessions.get(id)?.session,flush:async session=>{durableEvents.set(session.id,clone(sessions.get(session.id).events));return true;}},
     sessionQuery:{observeSession:async id=>{const agent=sessions.get(id);if(!agent)throw new GmError('SESSION_NOT_FOUND','missing',404);return{header:clone(agent.session.header),events:clone(agent.events),inheritedEventCount:agent.session.inheritedEventCount??0,[Symbol.dispose](){}};}},
     tools:{selectExecutor:()=>({describe:()=>({schemas:[]})}),get:(name,agent)=>name==='run_code'?undefined:agent?.denied.has(name)?undefined:agent?.tools.get(name)},
     systemPrompt:{context:definition=>{contexts.push(definition);return()=>contexts.splice(contexts.indexOf(definition),1);}},
@@ -24,7 +26,7 @@ export async function contractFixture(t){
     typertGateway:{invoke:async({namespace,method,args})=>{
       if(namespace!=='session')throw Error('unsupported namespace');const request=args.request;
       if(method==='create'){let agent=sessions.get(request.sessionId);if(!agent){agent=makeAgent(request.sessionId);counts.creates++;await emit('agent/created',{agent});}if(faults.createLost){faults.createLost=false;throw new GmError('LOST_RESPONSE','Lost create response',503);}return {sessionId:agent.id,agentPreset:request.agentPreset};}
-      if(method==='prompt'){const agent=sessions.get(request.sessionId);if(!states.get(agent.id)?.initialized||!lastBindings.has(agent.id))throw Error('prompt before ready');if(!prompts.has(request.requestId)){prompts.add(request.requestId);counts.prompts++;if(!agent.events.length)append(agent,'system/message',{message:{id:'head',role:'system',content:[{type:'text',text:'protected native head'}]}},'append');append(agent,'user/message',{id:randomUUID(),role:'user',source:{kind:'user-rpc',rpcId:request.requestId},content:clone(request.content)},'append');}if(faults.promptLost){faults.promptLost=false;throw new GmError('LOST_RESPONSE','Lost prompt response',503);}return {accepted:true};}
+      if(method==='prompt'){const agent=sessions.get(request.sessionId);if(!states.get(agent.id)?.initialized||!lastBindings.has(agent.id))throw Error('prompt before ready');if(!prompts.has(request.requestId)){prompts.add(request.requestId);counts.prompts++;if(!agent.events.length)append(agent,'system/message',{message:{id:'head',role:'system',content:[{type:'text',text:'protected native head'}]}},'append');append(agent,'user/message',{id:randomUUID(),role:'user',source:{kind:'user',rpcId:request.requestId},content:clone(request.content)},'append');}if(faults.promptLost){faults.promptLost=false;throw new GmError('LOST_RESPONSE','Lost prompt response',503);}return {accepted:true};}
       throw Error(`unsupported ${method}`);
     }},
   };
@@ -38,7 +40,7 @@ export async function contractFixture(t){
   };
   services.set('rpDatabase',db);services.set('rpLastStep',last);
   const readSession=async id=>{const agent=sessions.get(id);return agent?{header:clone(agent.session.header),events:clone(agent.events)}:null;};
-  return {ctx,directory,counts,faults,services,sessions,presets,states,profiles,lastBindings,contexts,effects,emit,append,makeAgent,readSession,options:{directory,readSession},db,last,
+  return {ctx,directory,counts,faults,services,sessions,presets,states,profiles,lastBindings,contexts,effects,emit,append,makeAgent,readSession,options:{directory,readSession},db,last,durableEvents,
     getRevision:()=>revision,bumpRevision:()=>++revision,
   };
 }

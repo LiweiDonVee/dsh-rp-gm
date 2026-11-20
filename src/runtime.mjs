@@ -31,12 +31,13 @@ export function createGmRuntime({ctx,store,database,bound,viewFor,notify,reviewS
   }
   async function storyState(input){
     const record=await refresh(input.sessionId,input.agent,input.signal);if(!record)fail('STORY_NOT_FOUND','Story binding is unavailable',404);
+    const journal=await store.launch(record.binding.launchId),reading={...journal?.promptRequestId?{openingRequestId:journal.promptRequestId}:{},...record.opening?.receiptId?{openingFactReceiptId:record.opening.receiptId}:{}};
     const agent=input.agent??ctx.agents.get(input.sessionId);
     const gated=await reserved(input.sessionId),fork=typeof ctx.get('rpLastStep')?.inheritSession==='function'&&!gated;
-    if(!agent){const snapshot=await database().effectiveV2({sessionId:input.sessionId,signal:input.signal});return {binding:freeze(clone(record.binding)),...readState({...snapshot,entries:snapshot.entries.filter(entry=>entry.mode!=='disabled')}),capabilities:{rollback:false,fork,autoplay:false}};}
+    if(!agent){const snapshot=await database().effectiveV2({sessionId:input.sessionId,signal:input.signal});return {binding:freeze(clone(record.binding)),reading,...readState({...snapshot,entries:snapshot.entries.filter(entry=>entry.mode!=='disabled')}),capabilities:{rollback:false,fork,autoplay:false}};}
     const current=await scope({...input,agent}),snapshot=await current.access.snapshot(),receipt=await latest(current);
     const review=!gated&&database().capabilities?.factReview===1?await reviewState?.({sessionId:input.sessionId,signal:input.signal}):undefined;
-    return {binding:freeze(clone(record.binding)),...readState(snapshot),...receipt?{lastFactReceipt:freeze(clone(receipt))}:{},...review?{review}:{},capabilities:{rollback:fork&&receipt?.kind==='turn'&&receipt.source.turnStartSeq>0,fork,autoplay:false,...review?{factReview:true,factRegeneration:true}:{}}};
+    return {binding:freeze(clone(record.binding)),reading,...readState(snapshot),revision:snapshot.revision,...receipt?{lastFactReceipt:freeze(clone(receipt))}:{},...review?{review}:{},capabilities:{rollback:fork&&receipt?.kind==='turn'&&receipt.source.turnStartSeq>0,fork,autoplay:false,...review?{factReview:true,factRegeneration:true}:{}}};
   }
   return {
     refresh,storyState,reserved,assertPlayable,
@@ -71,7 +72,7 @@ export function createGmRuntime({ctx,store,database,bound,viewFor,notify,reviewS
       const current=await scope({sessionId:id,agent:exec.agent,signal:exec.signal}),canonical=canonicalSource(exec,'rp_commit_turn');
       const policy=await store.review(id),feature=database().capabilities?.factReview===1;
       if(feature){const state=await database().factReviewState({sessionId:id,signal:exec.signal});if(state.rounds.some(round=>round.pendingCandidateId)||state.decisions.some(value=>['recorded','interrupted'].includes(value.status)))fail('FACT_REVIEW_PENDING','Resolve the pending fact review before starting another round',409);}
-      if(policy.enabled)fail(feature?'FACT_APPROVAL_REQUIRED':'FACT_REVIEW_UNAVAILABLE',feature?'Submit rp_propose_turn as the sole terminal call for owner review':'Install Database with fact review support',409);
+      if(policy.enabled)fail(feature?'FACT_APPROVAL_REQUIRED':'FACT_REVIEW_UNAVAILABLE',feature?'Submit rp_propose_turn as the final direct tool call for owner review':'Install Database with fact review support',409);
       const receipt=await current.access.commit({...canonical,expectedRevision:input.expectedRevision,operations:stateOperations(input,record.binding.factEntryRefs),summary:input.summary,packet:clone(input.packet),kind:'turn',...feature?{capture:captureFactTurn(current.view,canonical,record.binding)}:{}});
       await store.receipt(id,receipt.id);notify(id);return receipt;
     },
@@ -80,7 +81,7 @@ export function createGmRuntime({ctx,store,database,bound,viewFor,notify,reviewS
       if(factOperationLive?.(id))fail('FACT_REVIEW_PENDING','A fact review operation is still running',409);
       if(record?.binding.status!=='active')fail('OPENING_REQUIRED','Present the selected opening before proposing a normal turn',409);
       const current=await scope({sessionId:id,agent:exec.agent,signal:exec.signal}),canonical=canonicalSource(exec,'rp_propose_turn'),assistant=current.view.events.find(event=>event.type==='assistant/message'&&event.data.message.id===canonical.source.assistantMessageId),calls=assistant.data.message.content.filter(block=>block.type==='tool-call');
-      if(calls.length!==1||typeof exec.concludeTurn!=='function')fail('SOLE_TERMINAL_REQUIRED','rp_propose_turn must be the sole direct terminal call',409);
+      if(calls.at(-1)?.id!==exec.callId||typeof exec.concludeTurn!=='function')fail('FINAL_TERMINAL_REQUIRED','rp_propose_turn must be the final direct tool call in its assistant message; earlier reads are allowed, but no tool may follow it',409);
       if(database().capabilities?.factReview!==1||typeof current.access.propose!=='function')fail('FACT_REVIEW_UNAVAILABLE','Install Database with fact review support',503);
       const state=await database().factReviewState({sessionId:id,signal:exec.signal}),sameSource=round=>round.turnKey===canonical.turnKey&&round.source.callId===canonical.source.callId&&round.source.assistantMessageId===canonical.source.assistantMessageId;
       if(state.rounds.some(round=>round.pendingCandidateId&&!sameSource(round))||state.decisions.some(value=>['recorded','interrupted'].includes(value.status)))fail('FACT_REVIEW_PENDING','Resolve the pending fact review before another proposal',409);

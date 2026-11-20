@@ -27,7 +27,7 @@ test('turn validation rejects forged ownership and packet extensions',()=>{
   const base={expectedRevision:3,summary:'交出信件',packet:{playerAction:'把信交给林遥'}};
   assert.throws(()=>normalizeTurn({...base,source:{callId:'fake'}}),{code:'INVALID_TURN'});
   assert.throws(()=>normalizeTurn({...base,packet:{playerAction:'x',factReceiptId:'fake'}}),{code:'INVALID_PACKET'});
-  assert.throws(()=>normalizeTurn({...base,packet:{playerAction:'x',variables:{count:2}}}),{code:'INVALID_PACKET'});
+  assert.deepEqual(normalizeTurn({...base,packet:{playerAction:'x',variables:{count:2}}}).packet.variables,{count:'2'});
   assert.throws(()=>normalizeTurn({...base,facts:{schemaVersion:1,items:[{id:'a',text:''}]}}),{code:'INVALID_STORY'});
   assert.deepEqual(normalizeTurn(base).operations,[]);
 });

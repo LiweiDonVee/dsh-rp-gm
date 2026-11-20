@@ -1,5 +1,5 @@
 import {randomUUID,createHash} from 'node:crypto';
-import {mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
+import {mkdir,open,readFile,rename,rm,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {clone,fail,requestFingerprint,text} from './core.mjs';
 import {normalizeState} from './transfer-schema.mjs';
@@ -10,7 +10,7 @@ const statuses=new Set(['prepared','starting','active','failed','restoring']);
 const steps=new Set(['created','sources','initialized','profile','prompt']);
 const bindingFields=new Set(['schemaVersion','id','sessionId','launchId','title','status','character','persona','opening','examples','sources','profile','factEntryRefs','createdAt']);
 
-/** Atomic binding/launch metadata only. World entries and fact receipts live in Database. */
+/** Atomic binding and launch metadata, plus the PC's operation receipts. Database owns committed facts. */
 export function createBindingStore({directory}) {
   const root=resolve(text(directory,'Store directory')),path=join(root,'state.json'),queueKey=process.platform==='win32'?root.toLowerCase():root;
   async function read(){
@@ -19,14 +19,59 @@ export function createBindingStore({directory}) {
   }
   function serial(work){const result=(queues.get(queueKey)??Promise.resolve()).then(work),settled=result.then(()=>{},()=>{});queues.set(queueKey,settled);void settled.then(()=>{if(queues.get(queueKey)===settled)queues.delete(queueKey);});return result;}
   const get=work=>serial(async()=>clone(work(await read())));
-  async function mutate(work){return serial(async()=>{const state=await read(),before=JSON.stringify(state),result=await work(state);if(JSON.stringify(state)!==before){state.revision++;await mkdir(root,{recursive:true});const temporary=join(root,`.state-${randomUUID()}.tmp`);try{await writeFile(temporary,JSON.stringify(state),{encoding:'utf8',flag:'wx'});await rename(temporary,path);}catch(error){await rm(temporary,{force:true});throw error;}}return clone(result);});}
+  async function mutate(work,{operation=false}={}){
+    return serial(async()=>{
+      const state=await read(),before=JSON.stringify(state),result=await work(state);
+      if(JSON.stringify(state)!==before){
+        if(!operation)state.revision++;
+        await mkdir(root,{recursive:true});
+        const temporary=join(root,`.state-${randomUUID()}.tmp`);
+        try{
+          if(operation){
+            const file=await open(temporary,'wx');
+            try{await file.writeFile(JSON.stringify(state),'utf8');await file.sync();}finally{await file.close();}
+          }else await writeFile(temporary,JSON.stringify(state),{encoding:'utf8',flag:'wx'});
+          await rename(temporary,path);
+        }catch(error){await rm(temporary,{force:true});throw error;}
+      }
+      return clone(result);
+    });
+  }
   function launchOf(state,id){const value=state.launches[hash(text(id,'Launch ID'))];if(!value)fail('LAUNCH_NOT_FOUND','Launch is unavailable',404);return value;}
   function bound(state,id){const value=state.bindings[hash(text(id,'Session ID'))];if(!value)fail('STORY_NOT_FOUND','Story binding is unavailable',404);return value;}
+  function reserveLaunch(state,request){
+    const key=hash(request.launchId),fingerprint=requestFingerprint(request),existing=state.launches[key];
+    if(existing){
+      if(existing.fingerprint!==fingerprint)fail('LAUNCH_CONFLICT','This launch already belongs to a different reviewed request',409);
+      return existing;
+    }
+    return state.launches[key]={launchId:request.launchId,fingerprint,id:randomUUID(),sessionId:randomUUID(),promptRequestId:randomUUID(),createdAt:new Date().toISOString(),progress:{}};
+  }
+  const matches=(value,scope)=>value.operationId===scope.operationId&&(!scope.sessionId||value.sessionId===scope.sessionId)&&(!scope.launchId||value.launchId===scope.launchId);
   return {
+    operation:scope=>get(state=>(state.operations??[]).find(value=>matches(value,scope))??null),
+    operations:scope=>get(state=>(state.operations??[]).filter(value=>(!scope?.sessionId||value.sessionId===scope.sessionId)&&(!scope?.launchId||value.launchId===scope.launchId))),
+    acceptOperation(operation){return mutate(state=>{
+      state.operations??=[];const prior=state.operations.find(value=>value.operationId===operation.operationId&&(value.sessionId===operation.sessionId||operation.launchId&&value.launchId===operation.launchId));
+      if(prior){if(prior.fingerprint!==operation.fingerprint)fail('OPERATION_ID_CONFLICT','This operation ID already belongs to different input',409);return {created:false,operation:prior};}
+      const newLaunch=operation.launchId&&!state.launches[hash(operation.launchId)];
+      const sessionId=operation.launchId?reserveLaunch(state,operation.input).sessionId:operation.sessionId;
+      if(state.restoreGates?.[hash(sessionId)]||state.bindings[hash(sessionId)]?.binding.status==='restoring')
+        fail('STORY_RESTORING','This story is reserved or its required state is still restoring',409);
+      if(state.operations.some(value=>value.sessionId===sessionId&&['accepted','running','cancelling'].includes(value.status)))fail('STORY_BUSY','Another operation is still running for this story',409);
+      const value={...clone(operation),sessionId};
+      if(newLaunch)state.revision++;
+      state.operations.push(value);return {created:true,operation:value};
+    },{operation:true});},
+    updateOperation(scope,work){return mutate(state=>{
+      const value=(state.operations??[]).find(item=>matches(item,scope));if(!value)fail('OPERATION_NOT_FOUND','The stored operation is unavailable',404);
+      const before=JSON.stringify(value);work(value);if(JSON.stringify(value)!==before){value.revision++;value.updatedAt=new Date().toISOString();}return value;
+    },{operation:true});},
     contentRevision:()=>get(state=>({revision:state.revision})),
     exportSelection:ids=>get(state=>{const bindings=ids.map(id=>{const value=state.bindings[hash(id)];if(!value)fail('RESTORE_REQUIREMENT_MISSING','Selected GM binding is unavailable',409,{requirement:`gm-binding:${id}`});return value;}),launches=[...new Set(bindings.map(item=>item.binding.launchId))].map(id=>launchOf(state,id));return {schemaVersion:1,revision:state.revision,payload:{bindings,launches}};}),
-    reserve(request){return mutate(state=>{const key=hash(request.launchId),fingerprint=requestFingerprint(request),existing=state.launches[key];if(existing){if(existing.fingerprint!==fingerprint)fail('LAUNCH_CONFLICT','This launch already belongs to a different reviewed request',409);return existing;}return state.launches[key]={launchId:request.launchId,fingerprint,id:randomUUID(),sessionId:randomUUID(),promptRequestId:randomUUID(),createdAt:new Date().toISOString(),progress:{}};});},
+    reserve(request){return mutate(state=>reserveLaunch(state,request));},
     launch:id=>get(state=>state.launches[hash(id)]??null),
+    launchForSession:id=>get(state=>Object.values(state.launches).find(value=>value.sessionId===id)??null),
     prepare(id,binding,reviewEnabled=false){return mutate(state=>{const launch=launchOf(state,id);if(Object.keys(binding).some(key=>!bindingFields.has(key))||binding.schemaVersion!==1||binding.sessionId!==launch.sessionId||binding.id!==launch.id||binding.launchId!==id)fail('INVALID_BINDING','Binding must contain only reviewed metadata');const existing=state.bindings[hash(binding.sessionId)];if(existing){const {status:oldStatus,...old}=existing.binding,{status:newStatus,...next}=binding;void oldStatus;void newStatus;if(requestFingerprint(old)!==requestFingerprint(next))fail('LAUNCH_CONFLICT','Prepared binding cannot change',409);return existing;}return state.bindings[hash(binding.sessionId)]={binding:clone(binding),review:{schemaVersion:1,revision:0,enabled:reviewEnabled===true,decisions:[],generations:[],presentations:[]}};});},
     review:id=>get(state=>bound(state,id).review??{schemaVersion:1,revision:0,enabled:false,decisions:[],generations:[]}),
     updateReview(id,work){return mutate(state=>{const record=bound(state,id),review=record.review??{schemaVersion:1,revision:0,enabled:false,decisions:[],generations:[]},before=JSON.stringify(review);work(review);if(JSON.stringify(review)!==before){review.revision++;record.review=review;}return review;});},

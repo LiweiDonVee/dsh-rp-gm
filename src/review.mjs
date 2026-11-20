@@ -1,6 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import {clone,fail,freeze,object,requestFingerprint,text} from './core.mjs';
 import {exactFields,normalizeCandidate,normalizeDecision,normalizeGeneration,operationToken,revision} from './review-schema.mjs';
+import {flushNativeSession} from './native-persistence.mjs';
+import {OWNER_CANCELLED} from './operations.mjs';
 
 const DECIDE='rp-gm-fact-decision';
 const GENERATE='rp-gm-fact-regenerate';
@@ -25,14 +27,14 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
   async function anchor(invocation,name,operationId,hash){
     const sessionId=invocation.agent.session.id,scope=dispatches.get(sessionId);if(scope?.name!==name||scope.operationId!==operationId||scope.requestHash!==hash||!live.has(sessionId)||invocation.agent!==ctx.agents.get(sessionId)||typeof invocation.commandId!=='string')fail('DECISION_SOURCE_INVALID','An active owner request is required',403);
     const rows=await events(sessionId,invocation.signal),matches=rows.filter(row=>row.type==='command/run'&&row.data?.commandId===invocation.commandId);if(matches.length!==1)fail('DECISION_SOURCE_INVALID','A unique owner command source is required',403);
-    const source={sessionId,commandId:invocation.commandId,runSeq:matches[0].seq,requestHash:hash};validRun(rows,source,name,operationId,hash);return source;
+    const source={sessionId,commandId:invocation.commandId,runSeq:matches[0].seq,requestHash:hash};validRun(rows,source,name,operationId,hash);await flushNativeSession(ctx,sessionId);invocation.signal?.throwIfAborted();return source;
   }
   async function completion(source,name,operationId,hash,expected){
     if(!source)return null;const rows=await events(source.sessionId);validRun(rows,source,name,operationId,hash);const matches=rows.filter(row=>row.type==='command/done'&&row.data?.commandId===source.commandId);
     if(matches.length!==1||matches[0].seq<=source.runSeq||matches[0].data.kind!=='success')return null;
     let value;try{value=JSON.parse(matches[0].data.text);}catch{fail('DECISION_SOURCE_INVALID','Owner command completion did not return its bound result',403);}
     if(!object(value)||JSON.stringify(Object.keys(value).sort())!==JSON.stringify(Object.keys(expected).sort())||requestFingerprint(value)!==requestFingerprint(expected))fail('DECISION_SOURCE_INVALID','Owner command completion does not match the stored request',403);
-    return {...clone(source),doneSeq:matches[0].seq};
+    await flushNativeSession(ctx,source.sessionId);return {...clone(source),doneSeq:matches[0].seq};
   }
   async function dispatch(input,name,operationId,requestHash){
     if(typeof ctx.commands?.register!=='function')fail('OWNER_COMMAND_UNAVAILABLE','A recorded native owner command is required',503);
@@ -101,6 +103,7 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
     let source=decision?.source??entry.source,done=await completion(source,DECIDE,entry.operationId,entry.requestHash,{schemaVersion:1,operationId:entry.operationId,requestHash:entry.requestHash});
     if(!done){await dispatch(input,DECIDE,entry.operationId,entry.requestHash);entry=await findDecision(input.sessionId,entry.operationId);source=(await db.factDecision({sessionId:input.sessionId,operationId:entry.operationId,signal:input.signal}))?.source??entry.source;done=await completion(source,DECIDE,entry.operationId,entry.requestHash,{schemaVersion:1,operationId:entry.operationId,requestHash:entry.requestHash});}
     if(!done)fail('DECISION_NOT_CONFIRMED','The owner command has no matching successful completion',409);
+    input.signal?.throwIfAborted();
     const finalized=await db.finalizeFactDecision({sessionId:input.sessionId,operationId:entry.operationId,source:done,signal:input.signal});
     if(!['approved','cancelled'].includes(finalized.status)||finalized.status==='approved'&&!finalized.receipt?.id)fail('DECISION_NOT_CONFIRMED','The Database has not confirmed a fact outcome',409);
     const accepted=finalized.receipt?await acceptedPresentation(input.sessionId,finalized.receipt.id,input.signal):null;
@@ -108,11 +111,15 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
     await saveDecision(input.sessionId,entry.operationId,{result,completion:done});if(finalized.receipt)await store.receipt(input.sessionId,finalized.receipt.id);notify(input.sessionId);
     return result.status==='approved'&&write&&!accepted?present(input,entry,result):result;
   }
-  async function replayDecision(input,entry){
+  async function replayDecision(input,entry,provePresentation=false){
     const decision=await provider().factDecision({sessionId:input.sessionId,operationId:entry.operationId,signal:input.signal});
     if(decision?.status!=='applied'||decision.requestHash!==entry.requestHash||entry.result.factReceiptId!==decision.factReceiptId||!await completion(decision.source,DECIDE,entry.operationId,entry.requestHash,{schemaVersion:1,operationId:entry.operationId,requestHash:entry.requestHash}))fail('DECISION_NOT_CONFIRMED','The stored outcome has no matching successful native decision',409);
     const accepted=entry.result.status==='approved'?await acceptedPresentation(input.sessionId,entry.result.factReceiptId,input.signal):null;
     if(accepted){const result={...clone(entry.result),presentation:{status:'complete',presentationId:accepted.ref.presentationId}};if(requestFingerprint(result)!==requestFingerprint(entry.result))await saveDecision(input.sessionId,entry.operationId,{result});return result;}
+    if(provePresentation&&entry.result.presentation.status==='complete'){
+      if(typeof ctx.get('rpLastStep')?.narratives!=='function')fail('LAST_STEP_UNAVAILABLE','LastStep is unavailable for presentation verification',503);
+      fail('DECISION_NOT_CONFIRMED','The stored decision has no accepted canonical presentation',409);
+    }
     return clone(entry.result);
   }
   async function decide(input,write=true){
@@ -136,11 +143,11 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
       if(!done){await dispatch(input,GENERATE,job.operationId,job.requestHash);job=await findJob(input.sessionId,job.operationId);state=await db.factReviewState({sessionId:input.sessionId,signal:input.signal});candidate=generatedCandidate(state,job);if(!candidate)fail('GENERATION_NOT_STAGED','The generation command did not stage a candidate',409);generationTarget(state,job,candidate);done=await completion(job.source,GENERATE,job.operationId,job.requestHash,{schemaVersion:1,operationId:job.operationId,candidateId:candidate.id,payloadHash:candidate.payloadHash});}
       if(!done)fail('DECISION_NOT_CONFIRMED','The generation command has no matching successful completion',409);input.signal?.throwIfAborted();
       const confirmed=await db.stageFactCandidate({sessionId:input.sessionId,roundId:job.roundId,payload:clone(candidate.payload),...job.model?{model:clone(job.model)}:{},operationId:job.operationId,expectedRoundVersion:job.request.expectedRoundVersion,source:job.source,approvalRequired:job.request.approvalRequired,generationRequest:clone(job.request),completion:done,signal:input.signal});
-      round=confirmed.round;await saveJob(input.sessionId,job.operationId,{candidateId:candidate.id,status:'complete',completion:done,errorCode:undefined});job=await findJob(input.sessionId,job.operationId);
+      round=confirmed.round;await saveJob(input.sessionId,job.operationId,{candidateId:candidate.id,status:'complete',completion:done,errorCode:undefined});job=await findJob(input.sessionId,job.operationId);input.signal?.throwIfAborted();
       if(job.request.approvalRequired)return {job:publicJob(job),round};
       state=await db.factReviewState({sessionId:input.sessionId,signal:input.signal});const decision=await decide({sessionId:input.sessionId,roundId:job.roundId,candidateId:candidate.id,action:'approve',operationId:job.decisionOperationId,expectedRoundVersion:round.version,expectedDatabaseRevision:state.databaseRevision,signal:input.signal},write);round=(await db.factReviewState({sessionId:input.sessionId,signal:input.signal})).rounds.find(value=>value.roundId===job.roundId);return {job:publicJob(job),round,decision};
     }catch(error){
-      const current=await findJob(input.sessionId,job.operationId);if(current.status!=='complete')await saveJob(input.sessionId,job.operationId,{status:current.status==='cancelled'?'cancelled':input.signal?.aborted?'interrupted':'failed',errorCode:safeError(error)});throw error;
+      const current=await findJob(input.sessionId,job.operationId);if(current.status!=='complete')await saveJob(input.sessionId,job.operationId,{status:current.status==='cancelled'||input.signal?.reason===OWNER_CANCELLED?'cancelled':input.signal?.aborted?'interrupted':'failed',errorCode:safeError(error)});throw error;
     }
   }
   async function resumePresentation(input){
@@ -164,7 +171,35 @@ export function createFactReview({ctx,store,runtime,database,bound,viewFor,notif
     if(!presentation){presentation={operationId:input.operationId,roundId:input.roundId,factReceiptId:decision.factReceiptId,presentationOperationId:randomUUID()};await store.updateReview(input.sessionId,value=>{value.presentations??=[];value.presentations.push(presentation);});}
     return present(input,presentation,result,async value=>{await store.updateReview(input.sessionId,state=>{state.presentations.find(item=>item.operationId===input.operationId).result=value;});notify(input.sessionId);});
   }
+  async function operationOutcome(kind,input){
+    const metadata=await store.review(input.sessionId);
+    if(kind==='regenerateFacts'||kind==='resumeFactGeneration'){
+      let job=metadata.generations.find(value=>value.operationId===input.operationId);if(!job)return null;
+      if(kind==='regenerateFacts'&&requestFingerprint(normalizeGeneration(input,job.request.approvalRequired))!==job.requestHash)return null;
+      const state=await provider().factReviewState({sessionId:input.sessionId}),candidate=generatedCandidate(state,job),round=state.rounds.find(value=>value.roundId===job.roundId);
+      const done=candidate?.generationConfirmed&&await completion(job.source,GENERATE,job.operationId,job.requestHash,{schemaVersion:1,operationId:job.operationId,candidateId:candidate.id,payloadHash:candidate.payloadHash});
+      if(!done)return job.status==='cancelled'?{status:'cancelled',result:{job:publicJob(job)}}:null;
+      if(job.status!=='complete'){await saveJob(input.sessionId,job.operationId,{candidateId:candidate.id,status:'complete',completion:done,errorCode:undefined});job=await findJob(input.sessionId,job.operationId);}
+      if(job.request.approvalRequired)return {status:'complete',result:{job:publicJob(job),round}};
+      const decision=metadata.decisions.find(value=>value.operationId===job.decisionOperationId);if(!decision?.result)return null;
+      const result=await replayDecision(input,decision,true);if(kind==='regenerateFacts'&&result.presentation.status==='interrupted')return null;
+      return {status:'complete',result:{job:publicJob(job),round,decision:result}};
+    }
+    const entry=metadata.decisions.find(value=>value.operationId===input.operationId);
+    if(entry?.result){
+      if(kind==='resumeFactPresentation'&&entry.request.roundId!==input.roundId)return null;
+      if(kind==='decideFacts'){const normalized=normalizeDecision(input),request={sessionId:input.sessionId,roundId:normalized.roundId,candidateId:normalized.candidateId,action:normalized.action,candidatePayloadHash:entry.request.candidatePayloadHash,...normalized.custom?{custom:normalized.custom}:{}};if(requestFingerprint(request)!==entry.requestHash)return null;}
+      const result=await replayDecision(input,entry,true);if(['decideFacts','resumeFactPresentation'].includes(kind)&&result.presentation.status==='interrupted')return null;return {status:'complete',result};
+    }
+    if(kind==='resumeFactPresentation'){
+      const item=(metadata.presentations??[]).find(value=>value.operationId===input.operationId);if(!item?.result||item.roundId!==input.roundId)return null;
+      const state=await provider().factReviewState({sessionId:input.sessionId}),decision=state.decisions.find(value=>value.operationId===input.operationId),accepted=await acceptedPresentation(input.sessionId,item.factReceiptId);
+      if(decision?.status==='applied'&&decision.factReceiptId===item.factReceiptId&&accepted?.ref?.presentationId)return {status:'complete',result:{...clone(item.result),presentation:{status:'complete',presentationId:accepted.ref.presentationId}}};
+    }
+    return null;
+  }
   const api={
+    operationOutcome,
     async reviewState(input){
       exactFields(input,['sessionId','signal']);await owned(input);let metadata=await store.review(input.sessionId);const state=await provider().factReviewState({sessionId:input.sessionId,signal:input.signal}),lastJob=metadata.generations.at(-1);let generation=null;
       if(lastJob){const candidate=generatedCandidate(state,lastJob),patch={...candidate?{candidateId:candidate.id}:{},...lastJob.status==='running'&&live.get(input.sessionId)?.operationId!==lastJob.operationId?{status:'interrupted'}:{}};if(Object.keys(patch).some(key=>lastJob[key]!==patch[key])){await saveJob(input.sessionId,lastJob.operationId,patch);metadata=await store.review(input.sessionId);}generation=publicJob(metadata.generations.at(-1));if(generation.status==='complete'&&(!candidate?.generationConfirmed||!await completion(lastJob.source,GENERATE,lastJob.operationId,lastJob.requestHash,{schemaVersion:1,operationId:lastJob.operationId,candidateId:candidate.id,payloadHash:candidate.payloadHash})))generation={...generation,status:'interrupted'};}

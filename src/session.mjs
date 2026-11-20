@@ -53,11 +53,14 @@ export function canonicalSource(exec,toolName) {
 
 /** Captures real current-turn input/evidence, never model-authored capture fields. */
 export function captureFactTurn(view,canonical,binding){
-  const rows=view.events.filter(event=>event.seq>canonical.source.turnStartSeq&&event.seq<canonical.source.callSeq),assistant=view.events.find(event=>event.type==='assistant/message'&&event.data?.message?.id===canonical.source.assistantMessageId),player=rows.findLast(event=>event.type==='user/message'&&event.data?.source?.kind==='user'&&event.seq<assistant?.seq);
+  const assistant=view.events.find(event=>event.type==='assistant/message'&&event.data?.message?.id===canonical.source.assistantMessageId),rows=view.events.filter(event=>event.seq>canonical.source.turnStartSeq&&event.seq<assistant?.seq),player=rows.findLast(event=>event.type==='user/message'&&event.data?.source?.kind==='user');
   if(!player||typeof player.data?.id!=='string')fail('FACT_CAPTURE_UNAVAILABLE','The canonical player input is unavailable',409);
   const content=message=>(message?.content??[]).filter(block=>block.type==='text').map(block=>block.text).join('\n');
   const excluded=new Set(['rp_gm_state','rp_begin_story','rp_commit_turn','rp_propose_turn','rp_present']),names=[...new Set(rows.filter(event=>event.type==='tool/call'&&!excluded.has(event.data?.name)).map(event=>event.data.name))];
-  const observations=canonicalToolResults(view,names,{includeErrors:true}).filter(({result,call})=>call.seq>canonical.source.turnStartSeq&&result.seq<canonical.source.callSeq).map(({result,call})=>({callSeq:call.seq,resultSeq:result.seq,toolName:call.data.name,text:content(result.data.message)}));
+  // Only results visible before the model authored this assistant are evidence.
+  // An exclusive earlier tool in this same message may finish before our call
+  // is logged, but the model has not seen that result when forming its args.
+  const observations=canonicalToolResults(view,names,{includeErrors:true}).filter(({result,call})=>call.seq>canonical.source.turnStartSeq&&result.seq<assistant.seq).map(({result,call})=>({callSeq:call.seq,resultSeq:result.seq,toolName:call.data.name,text:content(result.data.message)}));
   return {playerInput:{seq:player.seq,messageId:player.data.id,text:content(player.data)},story:{title:binding.title,character:structuredClone(binding.character),persona:structuredClone(binding.persona),examples:binding.examples},observations};
 }
 

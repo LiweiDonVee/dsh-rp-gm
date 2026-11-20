@@ -19,14 +19,14 @@
 | [RP Context 0.3.2](https://github.com/LiweiDonVee/dsh-rp-context/releases) | 可选，新事实／正文修订的有效材料选取 |
 | [Loop Studio 0.1.1](https://github.com/LiweiDonVee/dsh-loop-studio/releases) | 可选，配置主 Agent 与已接入阶段的模型路由 |
 
-可选阅读／存档界面使用 [RP Studio 1.5.0](https://github.com/LiweiDonVee/dsh-rp-studio/releases) 与 [StoryKit 0.2.2](https://github.com/LiweiDonVee/dsh-rp-story-kit/releases)。GM 本地安装包为 `dsh-rp-gm-0.2.2.tgz`，请与同批包的 SHA256SUMS 核对。
+可选阅读／存档界面使用 [RP Studio 1.5.0](https://github.com/LiweiDonVee/dsh-rp-studio/releases) 与 [StoryKit 0.2.2](https://github.com/LiweiDonVee/dsh-rp-story-kit/releases)。GM 本地安装包为 `dsh-rp-gm-0.2.3.tgz`，请与同批包的 SHA256SUMS 核对。
 
 将必需的三个 tgz 放在同一目录，在该目录打开终端；完全退出 DSH 后安装，再重启：
 
 ```powershell
 dsh plugin --profile desktop add ./dsh-rp-database-0.3.2.tgz
 dsh plugin --profile desktop add ./dsh-rp-last-step-0.4.2.tgz
-dsh plugin --profile desktop add ./dsh-rp-gm-0.2.2.tgz
+dsh plugin --profile desktop add ./dsh-rp-gm-0.2.3.tgz
 ```
 
 Web profile 将 desktop 改为 web。Windows 未配置 PATH 时，可用官方启动器：
@@ -35,7 +35,7 @@ Web profile 将 desktop 改为 web。Windows 未配置 PATH 时，可用官方�
 $gmCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd'
 & $gmCli plugin --profile desktop add ./dsh-rp-database-0.3.2.tgz
 & $gmCli plugin --profile desktop add ./dsh-rp-last-step-0.4.2.tgz
-& $gmCli plugin --profile desktop add ./dsh-rp-gm-0.2.2.tgz
+& $gmCli plugin --profile desktop add ./dsh-rp-gm-0.2.3.tgz
 ```
 
 旧 GM 0.1／Database 0.2／LastStep 0.3 的安装与验收属于 legacy 路径。新 GM 配旧 Database 时仅保留审批关闭的兼容流程，不传未知 capture，也不提供事实审批／重生；新材料修订使用上表组合。
@@ -117,6 +117,8 @@ resumeFactPresentation({sessionId,roundId,operationId,signal?})
 
 原生 owner Connection 路由：POST `/api/rp-gm/request` 支持 library、startSample、startStory、state、binding，以及上列 reviewState、configureReview、decideFacts、resumeFactDecision、regenerateFacts、resumeFactGeneration、cancelFactGeneration、resumeFactPresentation；GET `/api/rp-gm/events?sessionId=…` 提供变更订阅。SSE 只有变更元数据，正文和事实通过授权 owner request 读取。决定载体与恢复边界见[审批与重生说明](docs/fact-review.md)，既有架构见[架构说明](docs/architecture.md)。
 
+`capabilities.operations=1` 增加 `submitOperation`、`operation`、`operations`、`cancelOperation`，为手机持久受理开场与事实审阅。已受理任务在 PC 执行，手机可读回同一个操作。普通玩家行动通过原生 `session.prompt` 提交，停止当前回合时使用 `cancelTurn` 和精确的 `expectedTurnStartSeq`。[手机持续操作契约](docs/mobile-operations.md)
+
 新增能力为 `capabilities.factReview=1`、`factRegeneration=1`，API version 仍为 1。HTTP 还提供上列静态 review 动作；仅决定动作使用 `{action:'decideFacts',decision:{…原 owner 参数}}`，内层 `action` 是 approve/custom/cancel。浏览器和模型都不能提交 source、requestHash 或 stage。正文按钮直接请求 LastStep 原有 `/api/rp-last-step/request`，没有 GM 正文代理方法。
 
 ## 数据与备份
@@ -133,14 +135,14 @@ pnpm check
 pnpm package
 ```
 
-package 生成 `artifacts/dsh-rp-gm-0.2.2.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.2.2.tgz`。新流程需要上述具备 review/revision 能力的依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门、审批／生成恢复和原生面板。保留的 [native runner](scripts/native/README.md) 记录既有验收；V6 实际产品包的审批／两层重生五组功能断言全部通过，来源和发行验证边界见[当前原生证据](docs/native-acceptance.md)。
+package 生成 `artifacts/dsh-rp-gm-0.2.3.tgz` 与 SHA256SUMS，并检查 tarball 中独立 bundle 的 host/client 可以加载、没有 sibling workspace 依赖。从源码安装 GM 时，在仓库根目录执行 `dsh plugin --profile desktop add ./artifacts/dsh-rp-gm-0.2.3.tgz`。新流程需要上述具备 review/revision 能力的依赖。测试覆盖启动响应丢失、重复提交、政策、分支、回退、provider 原子性、恢复执行门、审批／生成恢复和原生面板。保留的 [native runner](scripts/native/README.md) 记录既有验收；V6 实际产品包的审批／两层重生五组功能断言全部通过，来源和发行验证边界见[当前原生证据](docs/native-acceptance.md)。
 
 MIT License。
 
 
 ## DSH 0.2.2 compatibility
 
-This release requires DSH `>=0.2.2-rc.1 <0.3.0-0`; the exact integration target is Desktop `0.2.2-rc.1`. Future versions in that range have not been individually accepted. Install Database/Context `0.3.2`, LastStep `0.4.2`, and GM/StoryKit `0.2.2` together when using story forks or saved-story restoration.
+This release requires DSH `>=0.2.2-rc.1 <0.3.0-0`; the exact integration target is Desktop `0.2.2-rc.1`. Future versions in that range have not been individually accepted. Install Database/Context `0.3.2`, LastStep `0.4.2` or later, GM `0.2.3`, and StoryKit `0.2.2` together when using story forks or saved-story restoration.
 
 DSH 0.2.2 ordinary forks preserve a verified event prefix without adding a parent to the canonical Session header. The host-only `rpGM.sessionLineage({sessionId, signal})` returns `{sessionId, parentSessionId: string | null, inheritedEventCount}` from GM's existing durable binding and actual Session observations. RP owners derive ancestry from this result; canonical headers and event logs retain their original bytes. Conflicting legacy header parents or changed prefixes are rejected.
 

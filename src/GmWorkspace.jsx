@@ -16,7 +16,7 @@ export function GmWorkspace({sessionId,visible=true,api=defaultApi}){
   useEffect(()=>{
     if(!visible||!selected||!api.state)return;const life=new AbortController();let latest=0;setSnapshot({sessionId:selected,data:null});
     const load=()=>{const request=++latest;return api.state(selected,life.signal).then(value=>{if(!life.signal.aborted&&request===latest)setSnapshot({sessionId:selected,data:value});}).catch(error=>{if(!life.signal.aborted&&request===latest)setSnapshot({sessionId:selected,data:null,error:error.message});});};
-    void load();const stop=api.subscribe?.(selected,load,()=>{});return()=>{life.abort();stop?.();};
+    const stop=api.subscribe?.(selected,load,()=>{});void load();return()=>{life.abort();stop?.();};
   },[api,selected,visible]);
   async function begin(){
     const request=pending??{launchId:crypto.randomUUID(),openingId},selection=ownerSelection.current;setPending(request);saveLaunch(request);setBusy(true);setError('');const life=new AbortController();activeRequest.current=life;
